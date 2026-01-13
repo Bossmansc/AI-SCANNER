@@ -1,21 +1,656 @@
+# Render Blueprint for High-Concurrency AI Application
+# Full production deployment configuration with optimized build settings
+
 services:
+  # Primary API Service
   - type: web
-    name: document-engine-api
+    name: codecraft-ai-api
     env: python
-    plan: free
-    region: oregon
-    buildCommand: pip install -r requirements.txt
-    startCommand: uvicorn app.main:app --host 0.0.0.0 --port $PORT
+    region: oregon  # us-west-2
+    plan: standard  # Production-grade plan
+    numInstances: 3  # High availability with 3 instances
+    instanceSize: M  # 2.5GB RAM, 2 vCPU
+    
+    # Build Configuration
+    buildCommand: |
+      pip install --upgrade pip
+      pip install -r requirements.txt
+      python -m pip install --upgrade setuptools wheel
+      
+    # Start Command
+    startCommand: |
+      gunicorn "app.main:app" \
+        --workers 4 \
+        --worker-class uvicorn.workers.UvicornWorker \
+        --bind 0.0.0.0:$PORT \
+        --timeout 120 \
+        --keep-alive 5 \
+        --max-requests 1000 \
+        --max-requests-jitter 50 \
+        --access-logfile - \
+        --error-logfile -
+    
+    # Health Check
+    healthCheckPath: /health
+    healthCheckTimeout: 30
+    
+    # Auto-Deploy
+    autoDeploy: true
+    branch: main
+    
+    # Environment Variables
     envVars:
-      - key: DATABASE_URL
-        value: sqlite:///./document_engine.db
-      - key: SECRET_KEY
-        generateValue: true
-      - key: OPENAI_API_KEY
-        sync: false
-      - key: PYTHON_VERSION
-        value: 3.10.13
-      - key: CARGO_HOME
-        value: /opt/render/project/src/.cargo
-      - key: RUSTUP_HOME
-        value: /opt/render/project/src/.rustup
+      - key: ENVIRONMENT
+        value: production
+      - key: LOG_LEVEL
+        value: INFO
+      - key: PYTHONPATH
+        value: /opt/render/project/src
+      - key: PYTHONUNBUFFERED
+        value: TRUE
+      - key: PYTHONDONTWRITEBYTECODE
+        value: 1
+      - key: UVICORN_LOG_LEVEL
+        value: warning
+      - key: GUNICORN_CMD_ARGS
+        value: "--log-level=info"
+    
+    # Advanced Scaling
+    scaling:
+      minInstances: 3
+      maxInstances: 10
+      targetMemoryPercent: 70
+      targetCPUPercent: 75
+      cooldownPeriod: 300
+    
+    # Disk Configuration
+    disk:
+      name: data
+      mountPath: /data
+      sizeGB: 10
+    
+    # Security Headers
+    headers:
+      - path: /*
+        name: X-Content-Type-Options
+        value: nosniff
+      - path: /*
+        name: X-Frame-Options
+        value: DENY
+      - path: /*
+        name: X-XSS-Protection
+        value: 1; mode=block
+      - path: /*
+        name: Strict-Transport-Security
+        value: max-age=31536000; includeSubDomains
+      - path: /*
+        name: Referrer-Policy
+        value: strict-origin-when-cross-origin
+      - path: /*
+        name: Content-Security-Policy
+        value: "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; font-src 'self' data:;"
+    
+    # CORS Configuration
+    cors:
+      allowOrigins:
+        - https://codecraft-ai.app
+        - https://www.codecraft-ai.app
+      allowMethods:
+        - GET
+        - POST
+        - PUT
+        - DELETE
+        - OPTIONS
+      allowHeaders:
+        - Content-Type
+        - Authorization
+        - X-Requested-With
+        - X-API-Key
+      allowCredentials: true
+      maxAge: 86400
+    
+    # Rate Limiting Configuration
+    rateLimit:
+      enabled: true
+      requestsPerMinute: 100
+      burstLimit: 20
+      excludePaths:
+        - /health
+        - /metrics
+    
+    # Database Connection Pool
+    database:
+      pool:
+        minConnections: 5
+        maxConnections: 20
+        connectionTimeout: 30
+        idleTimeout: 300
+    
+    # Monitoring and Observability
+    observability:
+      metrics:
+        enabled: true
+        port: 9090
+        path: /metrics
+      tracing:
+        enabled: true
+        sampleRate: 0.1
+      logging:
+        format: json
+        level: INFO
+        retentionDays: 30
+    
+    # Cache Configuration
+    cache:
+      enabled: true
+      type: redis
+      ttl: 3600
+      maxMemory: 256mb
+      evictionPolicy: allkeys-lru
+    
+    # Background Jobs Configuration
+    jobs:
+      concurrency: 4
+      timeout: 300
+      retryAttempts: 3
+      deadLetterQueue: true
+    
+    # File Upload Configuration
+    uploads:
+      maxSize: 50MB
+      allowedTypes:
+        - .py
+        - .js
+        - .ts
+        - .json
+        - .yaml
+        - .yml
+        - .md
+        - .txt
+      storagePath: /data/uploads
+      cleanupInterval: 86400
+    
+    # WebSocket Configuration
+    websocket:
+      enabled: true
+      pingInterval: 30
+      pingTimeout: 10
+      maxConnections: 1000
+      maxMessageSize: 16KB
+    
+    # API Versioning
+    api:
+      version: v1
+      prefix: /api/v1
+      deprecatedPaths:
+        - /api/v0/*
+      redirects:
+        - from: /api/v0/*
+          to: /api/v1/*
+          status: 301
+    
+    # Security Configuration
+    security:
+      jwt:
+        secretRotation: true
+        rotationInterval: 86400
+      apiKeys:
+        required: true
+        header: X-API-Key
+        validationRegex: ^[A-Za-z0-9]{32}$
+      ipWhitelist:
+        enabled: false
+        ranges: []
+    
+    # Performance Optimization
+    performance:
+      compression:
+        enabled: true
+        level: 6
+        minSize: 1024
+      caching:
+        static: 3600
+        api: 60
+      connection:
+        keepAlive: true
+        timeout: 30
+        maxRequests: 100
+    
+    # Backup Configuration
+    backups:
+      enabled: true
+      schedule: "0 2 * * *"  # Daily at 2 AM
+      retention: 7
+      include:
+        - /data
+        - /opt/render/project/src/config
+      exclude:
+        - /data/tmp
+        - /data/cache
+    
+    # Maintenance Window
+    maintenance:
+      enabled: true
+      window:
+        day: sunday
+        start: 01:00
+        duration: 60
+      notifications:
+        enabled: true
+        channels:
+          - email
+          - slack
+    
+    # Dependencies and Services
+    dependsOn:
+      - redis
+      - postgres
+    
+    # Resource Limits
+    resources:
+      memory:
+        limit: 2.5GB
+        reservation: 1GB
+      cpu:
+        limit: 2000m
+        reservation: 500m
+      storage:
+        ephemeral: 1GB
+        persistent: 10GB
+    
+    # Network Configuration
+    network:
+      ports:
+        - port: 10000
+          protocol: tcp
+      dns:
+        - 1.1.1.1
+        - 8.8.8.8
+      proxy:
+        enabled: true
+        timeout: 30
+    
+    # Custom Domains
+    domains:
+      - codecraft-ai.app
+      - api.codecraft-ai.app
+      - www.codecraft-ai.app
+    
+    # SSL/TLS Configuration
+    tls:
+      enabled: true
+      minimumVersion: "1.2"
+      ciphers: "ECDHE-RSA-AES128-GCM-SHA256:ECDHE-RSA-AES256-GCM-SHA384"
+      hsts:
+        enabled: true
+        maxAge: 31536000
+        includeSubdomains: true
+        preload: true
+    
+    # Load Balancer Configuration
+    loadBalancer:
+      algorithm: round_robin
+      stickySessions: false
+      healthCheck:
+        interval: 10
+        timeout: 5
+        healthyThreshold: 2
+        unhealthyThreshold: 3
+    
+    # Deployment Strategy
+    deployment:
+      strategy: rolling
+      maxSurge: 1
+      maxUnavailable: 0
+      readinessProbe:
+        initialDelay: 10
+        period: 5
+        timeout: 3
+        successThreshold: 1
+        failureThreshold: 3
+      livenessProbe:
+        initialDelay: 30
+        period: 10
+        timeout: 5
+        successThreshold: 1
+        failureThreshold: 3
+    
+    # Custom Metrics
+    customMetrics:
+      - name: api_requests_total
+        type: counter
+        help: "Total number of API requests"
+      - name: api_request_duration_seconds
+        type: histogram
+        help: "API request duration in seconds"
+        buckets: [0.1, 0.5, 1, 2, 5]
+      - name: active_connections
+        type: gauge
+        help: "Number of active connections"
+      - name: memory_usage_bytes
+        type: gauge
+        help: "Memory usage in bytes"
+      - name: cpu_usage_percent
+        type: gauge
+        help: "CPU usage percentage"
+    
+    # Alerting Configuration
+    alerts:
+      - metric: api_request_duration_seconds
+        condition: p95 > 2
+        severity: warning
+        notification: slack
+      - metric: memory_usage_bytes
+        condition: > 80%
+        severity: critical
+        notification: pagerduty
+      - metric: cpu_usage_percent
+        condition: > 90% for 5m
+        severity: critical
+        notification: pagerduty
+      - metric: active_connections
+        condition: > 800
+        severity: warning
+        notification: email
+    
+    # Cost Optimization
+    costOptimization:
+      autoScaleDown: true
+      scaleDownDelay: 900
+      reservedInstances: false
+      spotInstances: false
+    
+    # Regional Configuration
+    regional:
+      failover:
+        enabled: true
+        region: frankfurt  # eu-central-1
+      latencyBasedRouting: true
+      geoRestrictions: []
+    
+    # Custom Headers for API
+    customHeaders:
+      - path: /api/*
+        headers:
+          - name: X-API-Version
+            value: "1.0.0"
+          - name: X-Powered-By
+            value: "CodeCraft AI"
+          - name: X-Request-ID
+            value: "$request_id"
+    
+    # Request/Response Transformation
+    transformations:
+      request:
+        - path: /api/v1/*
+          addHeaders:
+            - name: X-Forwarded-For
+              value: "$remote_addr"
+        - path: /api/v1/upload/*
+          maxBodySize: 50MB
+      response:
+        - path: /api/v1/*
+          removeHeaders:
+            - Server
+            - X-Powered-By
+    
+    # Web Application Firewall Rules
+    waf:
+      enabled: true
+      rules:
+        - id: sql-injection
+          action: block
+          priority: 1
+        - id: xss
+          action: block
+          priority: 2
+        - id: rate-limit
+          action: block
+          priority: 3
+          rateLimit: 100
+          window: 60
+    
+    # API Documentation
+    documentation:
+      enabled: true
+      path: /docs
+      type: openapi
+      version: 3.0.0
+      securitySchemes:
+        - type: apiKey
+          name: X-API-Key
+          in: header
+    
+    # Webhook Configuration
+    webhooks:
+      - name: deployment
+        url: https://hooks.slack.com/services/...
+        events:
+          - deploy.start
+          - deploy.success
+          - deploy.failure
+        secret: $WEBHOOK_SECRET
+    
+    # Feature Flags
+    featureFlags:
+      enabled: true
+      provider: launchdarkly
+      sdkKey: $LAUNCHDARKLY_SDK_KEY
+      pollingInterval: 30
+    
+    # External Integrations
+    integrations:
+      - name: sentry
+        dsn: $SENTRY_DSN
+        environment: production
+      - name: datadog
+        apiKey: $DATADOG_API_KEY
+        site: datadoghq.com
+      - name: newrelic
+        licenseKey: $NEW_RELIC_LICENSE_KEY
+    
+    # Custom Build Hooks
+    buildHooks:
+      preBuild:
+        - echo "Starting build process..."
+        - python -m pip cache purge
+      postBuild:
+        - python -m compileall .
+        - find . -name "*.pyc" -delete
+      onSuccess:
+        - echo "Build completed successfully"
+        - curl -X POST https://api.statuspage.io/v1/pages/$PAGE_ID/components/$COMPONENT_ID/status -d "component[status]=operational" -H "Authorization: OAuth $STATUSPAGE_TOKEN"
+      onFailure:
+        - echo "Build failed"
+        - curl -X POST https://api.statuspage.io/v1/pages/$PAGE_ID/components/$COMPONENT_ID/status -d "component[status]=major_outage" -H "Authorization: OAuth $STATUSPAGE_TOKEN"
+    
+    # Database Migrations
+    migrations:
+      enabled: true
+      command: alembic upgrade head
+      runOnDeploy: true
+      rollbackOnFailure: true
+    
+    # Static Assets
+    staticAssets:
+      path: /static
+      directory: ./static
+      cacheControl: "public, max-age=31536000, immutable"
+      gzip: true
+      brotli: true
+    
+    # API Gateway Integration
+    apiGateway:
+      enabled: true
+      timeout: 29
+      caching:
+        enabled: true
+        ttl: 60
+        capacity: 100
+    
+    # Custom Middleware
+    middleware:
+      - name: request-logging
+        enabled: true
+      - name: compression
+        enabled: true
+      - name: cors
+        enabled: true
+      - name: rate-limiting
+        enabled: true
+      - name: authentication
+        enabled: true
+    
+    # Environment-Specific Configuration
+    environments:
+      production:
+        logLevel: WARNING
+        debug: false
+        testing: false
+      staging:
+        logLevel: INFO
+        debug: false
+        testing: true
+      development:
+        logLevel: DEBUG
+        debug: true
+        testing: true
+    
+    # Scheduled Tasks
+    scheduledTasks:
+      - name: cleanup-temp-files
+        schedule: "0 */6 * * *"
+        command: python scripts/cleanup.py
+      - name: generate-reports
+        schedule: "0 0 * * *"
+        command: python scripts/reports.py
+      - name: backup-database
+        schedule: "0 2 * * *"
+        command: python scripts/backup.py
+    
+    # Health Check Endpoints
+    healthChecks:
+      - path: /health
+        interval: 30
+        timeout: 5
+        healthyThreshold: 2
+        unhealthyThreshold: 3
+      - path: /health/db
+        interval: 60
+        timeout: 10
+      - path: /health/cache
+        interval: 60
+        timeout: 5
+    
+    # Custom Error Pages
+    errorPages:
+      404:
+        path: /errors/404.html
+        contentType: text/html
+      500:
+        path: /errors/500.html
+        contentType: text/html
+      503:
+        path: /errors/503.html
+        contentType: text/html
+    
+    # API Rate Limit Headers
+    rateLimitHeaders:
+      enabled: true
+      limitHeader: X-RateLimit-Limit
+      remainingHeader: X-RateLimit-Remaining
+      resetHeader: X-RateLimit-Reset
+      retryAfterHeader: Retry-After
+    
+    # WebSocket Event Types
+    websocketEvents:
+      - name: code_update
+        broadcast: true
+      - name: user_typing
+        broadcast: false
+      - name: system_notification
+        broadcast: true
+    
+    # File Processing
+    fileProcessing:
+      maxConcurrent: 10
+      timeout: 300
+      retryAttempts: 3
+      formats:
+        - name: python
+          extensions: [.py]
+          maxSize: 10MB
+        - name: javascript
+          extensions: [.js, .ts]
+          maxSize: 5MB
+        - name: yaml
+          extensions: [.yaml, .yml]
+          maxSize: 2MB
+    
+    # Cache Invalidation
+    cacheInvalidation:
+      strategy: tag-based
+      defaultTTL: 3600
+      patterns:
+        - pattern: "user:*"
+          ttl: 1800
+        - pattern: "session:*"
+          ttl: 7200
+        - pattern: "api:*"
+          ttl: 60
+    
+    # Monitoring Endpoints
+    monitoring:
+      metrics: /metrics
+      health: /health
+      readiness: /ready
+      liveness: /live
+      profiling: /debug/pprof
+    
+    # Security Scanning
+    securityScanning:
+      enabled: true
+      schedule: "0 3 * * *"
+      tools:
+        - bandit
+        - safety
+        - trivy
+      failOnCritical: true
+    
+    # Performance Budget
+    performanceBudget:
+      maxResponseTime: 2000ms
+      maxBundleSize: 500KB
+      maxRequests: 50
+      conformance: 95%
+    
+    # CDN Configuration
+    cdn:
+      enabled: true
+      provider: cloudflare
+      cacheEverything: true
+      browserCacheTTL: 3600
+      edgeCacheTTL: 86400
+      autoMinify:
+        js: true
+        css: true
+        html: true
+    
+    # API Throttling
+    throttling:
+      enabled: true
+      burst: 20
+      rate: 100
+      period: 60
+      scope: ip
+    
+    # Session Configuration
+    sessions:
+      type: redis
+      ttl: 86400
+      cookie:
+        secure: true
+        httpOnly: true
+        sameSite: lax
+        domain: .codecraft-ai.app
+    
