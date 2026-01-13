@@ -1,0 +1,521 @@
+version: '3.8'
+
+# ==============================================
+# SECURE DOCKER COMPOSE CONFIGURATION
+# Production-ready with security hardening
+# ==============================================
+
+services:
+  # ==================== WEB APPLICATION ====================
+  webapp:
+    build:
+      context: .
+      dockerfile: Dockerfile.prod
+      args:
+        - NODE_ENV=production
+        - BUILD_ID=${BUILD_ID:-latest}
+    container_name: secure-webapp-${BUILD_ID:-prod}
+    restart: unless-stopped
+    ports:
+      - "443:443"  # HTTPS only
+      - "80:80"    # HTTP redirect to HTTPS
+    expose:
+      - "3000"     # Internal port for load balancer
+    networks:
+      - frontend-network
+      - backend-network
+    volumes:
+      - ssl_certs:/etc/nginx/ssl:ro
+      - app_logs:/var/log/app:rw
+      - static_assets:/app/public:ro
+    environment:
+      - NODE_ENV=production
+      - APP_SECRET=${APP_SECRET}
+      - DATABASE_URL=postgresql://${DB_USER}:${DB_PASSWORD}@database:5432/${DB_NAME}
+      - REDIS_URL=redis://redis:6379/0
+      - SESSION_SECRET=${SESSION_SECRET}
+      - JWT_SECRET=${JWT_SECRET}
+      - CORS_ORIGIN=${CORS_ORIGIN:-https://example.com}
+      - RATE_LIMIT_WINDOW=15m
+      - RATE_LIMIT_MAX=100
+    env_file:
+      - .env.production
+    security_opt:
+      - no-new-privileges:true
+      - seccomp:unconfined
+    cap_drop:
+      - ALL
+    cap_add:
+      - NET_BIND_SERVICE
+    read_only: true
+    tmpfs:
+      - /tmp:size=100M,noexec,nosuid,nodev
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "5"
+        tag: "webapp"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    depends_on:
+      database:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 512M
+        reservations:
+          cpus: '0.25'
+          memory: 128M
+
+  # ==================== DATABASE (PostgreSQL) ====================
+  database:
+    image: postgres:15-alpine
+    container_name: secure-postgres-db
+    restart: unless-stopped
+    ports:
+      - "5432:5432"
+    networks:
+      - backend-network
+    volumes:
+      - postgres_data:/var/lib/postgresql/data:rw
+      - postgres_backups:/backups:rw
+      - ./init-db:/docker-entrypoint-initdb.d:ro
+    environment:
+      - POSTGRES_USER=${DB_USER}
+      - POSTGRES_PASSWORD=${DB_PASSWORD}
+      - POSTGRES_DB=${DB_NAME}
+      - POSTGRES_INITDB_ARGS=--auth-host=scram-sha-256
+      - POSTGRES_HOST_AUTH_METHOD=scram-sha-256
+      - PGDATA=/var/lib/postgresql/data/pgdata
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    cap_add:
+      - CHOWN
+      - SETGID
+      - SETUID
+    read_only: false
+    tmpfs:
+      - /tmp/postgresql:size=64M,noexec,nosuid,nodev
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+        tag: "postgres"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER}"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 60s
+    deploy:
+      resources:
+        limits:
+          cpus: '2.0'
+          memory: 2G
+        reservations:
+          cpus: '0.5'
+          memory: 512M
+    command: >
+      postgres
+      -c max_connections=200
+      -c shared_buffers=512MB
+      -c effective_cache_size=1536MB
+      -c maintenance_work_mem=128MB
+      -c checkpoint_completion_target=0.9
+      -c wal_buffers=16MB
+      -c default_statistics_target=100
+      -c ssl=on
+      -c ssl_cert_file=/var/lib/postgresql/data/server.crt
+      -c ssl_key_file=/var/lib/postgresql/data/server.key
+
+  # ==================== REDIS CACHE ====================
+  redis:
+    image: redis:7-alpine
+    container_name: secure-redis-cache
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    networks:
+      - backend-network
+    volumes:
+      - redis_data:/data:rw
+      - ./redis.conf:/usr/local/etc/redis/redis.conf:ro
+    environment:
+      - REDIS_PASSWORD=${REDIS_PASSWORD}
+      - REDIS_PORT=6379
+      - REDIS_DATABASES=16
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    cap_add:
+      - SETGID
+      - SETUID
+    read_only: true
+    tmpfs:
+      - /tmp/redis:size=50M,noexec,nosuid,nodev
+    command: >
+      redis-server /usr/local/etc/redis/redis.conf
+      --requirepass ${REDIS_PASSWORD}
+      --maxmemory 256mb
+      --maxmemory-policy allkeys-lru
+      --appendonly yes
+      --appendfsync everysec
+      --save 900 1
+      --save 300 10
+      --save 60 10000
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "5m"
+        max-file: "3"
+        tag: "redis"
+    healthcheck:
+      test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD}", "ping"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 256M
+        reservations:
+          cpus: '0.1'
+          memory: 64M
+
+  # ==================== NGINX REVERSE PROXY ====================
+  nginx:
+    image: nginx:1.24-alpine
+    container_name: secure-nginx-proxy
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    networks:
+      - frontend-network
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./nginx/conf.d:/etc/nginx/conf.d:ro
+      - ssl_certs:/etc/nginx/ssl:ro
+      - static_assets:/var/www/static:ro
+      - nginx_logs:/var/log/nginx:rw
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    cap_add:
+      - NET_BIND_SERVICE
+    read_only: true
+    tmpfs:
+      - /tmp/nginx:size=50M,noexec,nosuid,nodev
+      - /var/cache/nginx:size=100M,noexec,nosuid,nodev
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "5"
+        tag: "nginx"
+    healthcheck:
+      test: ["CMD", "nginx", "-t"]
+      interval: 60s
+      timeout: 10s
+      retries: 3
+    depends_on:
+      - webapp
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 128M
+        reservations:
+          cpus: '0.1'
+          memory: 32M
+
+  # ==================== MONITORING (Prometheus) ====================
+  prometheus:
+    image: prom/prometheus:v2.45.0
+    container_name: secure-prometheus-monitor
+    restart: unless-stopped
+    ports:
+      - "9090:9090"
+    networks:
+      - monitoring-network
+    volumes:
+      - prometheus_data:/prometheus:rw
+      - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./prometheus/alerts.yml:/etc/prometheus/alerts.yml:ro
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--web.console.libraries=/etc/prometheus/console_libraries'
+      - '--web.console.templates=/etc/prometheus/consoles'
+      - '--storage.tsdb.retention.time=30d'
+      - '--web.enable-lifecycle'
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    read_only: true
+    tmpfs:
+      - /tmp/prometheus:size=100M,noexec,nosuid,nodev
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+        tag: "prometheus"
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:9090/-/healthy"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 512M
+        reservations:
+          cpus: '0.1'
+          memory: 128M
+
+  # ==================== LOG AGGREGATOR (Fluentd) ====================
+  fluentd:
+    image: fluent/fluentd:v1.16-debian-1
+    container_name: secure-fluentd-logs
+    restart: unless-stopped
+    ports:
+      - "24224:24224"
+      - "24224:24224/udp"
+    networks:
+      - monitoring-network
+    volumes:
+      - fluentd_data:/fluentd/log:rw
+      - ./fluentd/fluent.conf:/fluentd/etc/fluent.conf:ro
+      - app_logs:/var/log/app:ro
+      - nginx_logs:/var/log/nginx:ro
+    environment:
+      - FLUENTD_CONF=fluent.conf
+      - FLUENTD_OPT=""
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    read_only: true
+    tmpfs:
+      - /tmp/fluentd:size=50M,noexec,nosuid,nodev
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+        tag: "fluentd"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:24224/api/plugins.json"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    deploy:
+      resources:
+        limits:
+          cpus: '0.3'
+          memory: 256M
+        reservations:
+          cpus: '0.05'
+          memory: 64M
+
+  # ==================== SECURITY SCANNER (Trivy) ====================
+  trivy:
+    image: aquasec/trivy:0.45.0
+    container_name: security-scanner-trivy
+    restart: "no"
+    networks:
+      - monitoring-network
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - ./trivy-reports:/reports:rw
+    environment:
+      - TRIVY_CACHE_DIR=/reports/cache
+      - TRIVY_TIMEOUT=10m
+      - TRIVY_QUIET=true
+      - TRIVY_FORMAT=json
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    read_only: true
+    tmpfs:
+      - /tmp/trivy:size=100M,noexec,nosuid,nodev
+    command: >
+      image
+      --severity HIGH,CRITICAL
+      --exit-code 1
+      --ignore-unfixed
+      --no-progress
+      --output /reports/scan-$(date +%Y%m%d-%H%M%S).json
+      webapp:${BUILD_ID:-latest}
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 1G
+        reservations:
+          cpus: '0.2'
+          memory: 256M
+
+  # ==================== BACKUP SERVICE ====================
+  backup:
+    image: postgres:15-alpine
+    container_name: secure-backup-service
+    restart: "no"
+    networks:
+      - backend-network
+    volumes:
+      - postgres_backups:/backups:rw
+      - ./backup-scripts:/scripts:ro
+    environment:
+      - PGHOST=database
+      - PGPORT=5432
+      - PGUSER=${DB_USER}
+      - PGPASSWORD=${DB_PASSWORD}
+      - PGDATABASE=${DB_NAME}
+      - BACKUP_RETENTION_DAYS=30
+      - ENCRYPTION_KEY=${BACKUP_ENCRYPTION_KEY}
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    read_only: true
+    tmpfs:
+      - /tmp/backup:size=100M,noexec,nosuid,nodev
+    command: >
+      /bin/sh -c '
+      echo "Starting backup at $(date)" &&
+      pg_dump -Fc -Z 9 -f /backups/backup-$(date +%Y%m%d-%H%M%S).dump &&
+      echo "Backup completed at $(date)" &&
+      find /backups -name "*.dump" -mtime +${BACKUP_RETENTION_DAYS} -delete
+      '
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "5m"
+        max-file: "3"
+        tag: "backup"
+    depends_on:
+      database:
+        condition: service_healthy
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 512M
+        reservations:
+          cpus: '0.1'
+          memory: 128M
+
+# ==================== NETWORKS ====================
+networks:
+  frontend-network:
+    driver: bridge
+    driver_opts:
+      com.docker.network.bridge.name: br-frontend
+      com.docker.network.bridge.enable_icc: "false"
+    ipam:
+      driver: default
+      config:
+        - subnet: 172.20.0.0/24
+          gateway: 172.20.0.1
+  backend-network:
+    driver: bridge
+    driver_opts:
+      com.docker.network.bridge.name: br-backend
+      com.docker.network.bridge.enable_icc: "true"
+    internal: true
+    ipam:
+      driver: default
+      config:
+        - subnet: 172.21.0.0/24
+          gateway: 172.21.0.1
+  monitoring-network:
+    driver: bridge
+    driver_opts:
+      com.docker.network.bridge.name: br-monitoring
+      com.docker.network.bridge.enable_icc: "true"
+    ipam:
+      driver: default
+      config:
+        - subnet: 172.22.0.0/24
+          gateway: 172.22.0.1
+
+# ==================== VOLUMES ====================
+volumes:
+  postgres_data:
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: ${PWD}/data/postgres
+  postgres_backups:
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: ${PWD}/backups
+  redis_data:
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: ${PWD}/data/redis
+  ssl_certs:
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: ${PWD}/ssl
+  app_logs:
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: ${PWD}/logs/app
+  nginx_logs:
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: ${PWD}/logs/nginx
+  static_assets:
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: ${PWD}/public
+  prometheus_data:
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: ${PWD}/data/prometheus
+  fluentd_data:
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: ${PWD}/data/fluentd
+
+# ==================== SECURITY CONFIGURATION NOTES ====================
+# 1. All containers run with no-new-privileges:

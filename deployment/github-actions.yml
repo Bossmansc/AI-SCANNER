@@ -1,0 +1,466 @@
+name: CI/CD Pipeline
+
+on:
+  push:
+    branches: [ main, develop ]
+    tags: [ 'v*' ]
+  pull_request:
+    branches: [ main, develop ]
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Deployment environment'
+        required: true
+        default: 'staging'
+        type: choice
+        options:
+        - staging
+        - production
+      force_deploy:
+        description: 'Force deployment (skip tests)'
+        required: false
+        default: false
+        type: boolean
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}
+  PYTHON_VERSION: '3.11'
+  NODE_VERSION: '18'
+  DOCKER_BUILDKIT: 1
+
+jobs:
+  validate:
+    name: Validate Code Quality
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    
+    steps:
+    - name: Checkout Repository
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
+        
+    - name: Setup Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: ${{ env.PYTHON_VERSION }}
+        cache: 'pip'
+        
+    - name: Install Python Dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install black flake8 mypy isort bandit safety
+        
+    - name: Run Black (Code Formatting)
+      run: |
+        black --check --diff .
+        
+    - name: Run Flake8 (Linting)
+      run: |
+        flake8 . --count --select=E9,F63,F7,F82 --show-source --statistics
+        flake8 . --count --exit-zero --max-complexity=10 --max-line-length=88 --statistics
+        
+    - name: Run MyPy (Type Checking)
+      run: |
+        mypy --install-types --non-interactive .
+        
+    - name: Run iSort (Import Sorting)
+      run: |
+        isort --check-only --diff .
+        
+    - name: Run Bandit (Security Scanning)
+      run: |
+        bandit -r . -f json -o bandit-report.json || true
+        
+    - name: Run Safety (Dependency Security)
+      run: |
+        pip freeze | safety check --stdin
+        
+    - name: Validate YAML Syntax
+      uses: actions/github-script@v7
+      with:
+        script: |
+          const yaml = require('js-yaml');
+          const fs = require('fs');
+          const path = require('path');
+          
+          function validateYamlFiles(dir) {
+            const files = fs.readdirSync(dir, { withFileTypes: true });
+            for (const file of files) {
+              const fullPath = path.join(dir, file.name);
+              if (file.isDirectory()) {
+                validateYamlFiles(fullPath);
+              } else if (file.name.endsWith('.yml') || file.name.endsWith('.yaml')) {
+                try {
+                  yaml.load(fs.readFileSync(fullPath, 'utf8'));
+                  console.log(`✓ Valid YAML: ${fullPath}`);
+                } catch (error) {
+                  throw new Error(`Invalid YAML in ${fullPath}: ${error.message}`);
+                }
+              }
+            }
+          }
+          
+          validateYamlFiles('.');
+          
+  test:
+    name: Run Tests
+    runs-on: ubuntu-latest
+    needs: validate
+    timeout-minutes: 30
+    strategy:
+      matrix:
+        python-version: ['3.9', '3.10', '3.11']
+        os: [ubuntu-latest, windows-latest]
+        
+    steps:
+    - name: Checkout Repository
+      uses: actions/checkout@v4
+      
+    - name: Setup Python ${{ matrix.python-version }}
+      uses: actions/setup-python@v5
+      with:
+        python-version: ${{ matrix.python-version }}
+        cache: 'pip'
+        
+    - name: Install Dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r requirements.txt
+        pip install -r requirements-dev.txt
+        pip install pytest pytest-cov pytest-xdist pytest-asyncio
+        
+    - name: Run Unit Tests
+      run: |
+        pytest tests/unit/ -v --cov=./ --cov-report=xml --cov-report=html --junitxml=junit.xml -n auto
+        
+    - name: Run Integration Tests
+      if: matrix.os == 'ubuntu-latest' && matrix.python-version == '3.11'
+      run: |
+        pytest tests/integration/ -v --cov=./ --cov-append
+        
+    - name: Upload Coverage to Codecov
+      if: matrix.os == 'ubuntu-latest' && matrix.python-version == '3.11'
+      uses: codecov/codecov-action@v4
+      with:
+        file: ./coverage.xml
+        flags: unittests
+        name: codecov-umbrella
+        
+    - name: Upload Test Results
+      uses: actions/upload-artifact@v4
+      with:
+        name: test-results-${{ matrix.os }}-${{ matrix.python-version }}
+        path: |
+          junit.xml
+          coverage.xml
+          
+  build-docker:
+    name: Build Docker Image
+    runs-on: ubuntu-latest
+    needs: test
+    if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
+    timeout-minutes: 20
+    
+    steps:
+    - name: Checkout Repository
+      uses: actions/checkout@v4
+      
+    - name: Set up Docker Buildx
+      uses: docker/setup-buildx-action@v3
+      
+    - name: Log in to Container Registry
+      uses: docker/login-action@v3
+      with:
+        registry: ${{ env.REGISTRY }}
+        username: ${{ github.actor }}
+        password: ${{ secrets.GITHUB_TOKEN }}
+        
+    - name: Extract Metadata
+      id: meta
+      uses: docker/metadata-action@v5
+      with:
+        images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+        tags: |
+          type=ref,event=branch
+          type=ref,event=pr
+          type=semver,pattern={{version}}
+          type=semver,pattern={{major}}.{{minor}}
+          type=sha,prefix={{branch}}-
+          type=raw,value=latest,enable=${{ github.ref == 'refs/heads/main' }}
+          
+    - name: Build and Push
+      uses: docker/build-push-action@v5
+      with:
+        context: .
+        push: ${{ github.event_name != 'pull_request' }}
+        tags: ${{ steps.meta.outputs.tags }}
+        labels: ${{ steps.meta.outputs.labels }}
+        cache-from: type=gha
+        cache-to: type=gha,mode=max
+        platforms: linux/amd64,linux/arm64
+        
+    - name: Scan Image with Trivy
+      uses: aquasecurity/trivy-action@master
+      with:
+        image-ref: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ github.sha }}
+        format: 'sarif'
+        output: 'trivy-results.sarif'
+        
+    - name: Upload Trivy Scan Results
+      uses: github/codeql-action/upload-sarif@v3
+      if: always()
+      with:
+        sarif_file: 'trivy-results.sarif'
+        
+  deploy-staging:
+    name: Deploy to Staging
+    runs-on: ubuntu-latest
+    needs: build-docker
+    if: |
+      (github.event_name == 'push' && github.ref == 'refs/heads/develop') ||
+      (github.event_name == 'workflow_dispatch' && github.event.inputs.environment == 'staging')
+    environment:
+      name: staging
+      url: https://staging.example.com
+      
+    steps:
+    - name: Checkout Repository
+      uses: actions/checkout@v4
+      
+    - name: Configure AWS Credentials
+      if: env.AWS_ACCESS_KEY_ID != ''
+      uses: aws-actions/configure-aws-credentials@v4
+      with:
+        aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+        aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+        aws-region: us-east-1
+        
+    - name: Deploy to ECS
+      if: env.AWS_ACCESS_KEY_ID != ''
+      run: |
+        aws ecs update-service \
+          --cluster staging-cluster \
+          --service app-service \
+          --force-new-deployment \
+          --region us-east-1
+          
+    - name: Deploy to Kubernetes
+      if: env.KUBECONFIG != ''
+      uses: azure/setup-kubectl@v3
+      with:
+        version: 'latest'
+        
+    - name: Update Kubernetes Deployment
+      if: env.KUBECONFIG != ''
+      run: |
+        kubectl set image deployment/app-deployment \
+          app=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ github.sha }} \
+          --namespace staging
+        
+    - name: Run Health Check
+      run: |
+        max_retries=30
+        interval=10
+        for i in $(seq 1 $max_retries); do
+          if curl -f https://staging.example.com/health; then
+            echo "Health check passed"
+            exit 0
+          fi
+          echo "Health check attempt $i failed, retrying in $interval seconds..."
+          sleep $interval
+        done
+        echo "Health check failed after $max_retries attempts"
+        exit 1
+        
+    - name: Notify Slack
+      if: always()
+      uses: 8398a7/action-slack@v3
+      with:
+        status: ${{ job.status }}
+        channel: '#deployments'
+        username: 'Deployment Bot'
+        
+  deploy-production:
+    name: Deploy to Production
+    runs-on: ubuntu-latest
+    needs: 
+      - test
+      - deploy-staging
+    if: |
+      (github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')) ||
+      (github.event_name == 'workflow_dispatch' && github.event.inputs.environment == 'production')
+    environment:
+      name: production
+      url: https://example.com
+      
+    steps:
+    - name: Checkout Repository
+      uses: actions/checkout@v4
+      
+    - name: Get Version
+      id: get_version
+      run: |
+        if [[ "${{ github.ref }}" == refs/tags/* ]]; then
+          echo "VERSION=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
+        else
+          echo "VERSION=${{ github.sha }}" >> $GITHUB_OUTPUT
+        fi
+        
+    - name: Create Release
+      id: create_release
+      uses: softprops/action-gh-release@v1
+      if: startsWith(github.ref, 'refs/tags/v')
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      with:
+        name: Release ${{ steps.get_version.outputs.VERSION }}
+        draft: false
+        prerelease: false
+        generate_release_notes: true
+        
+    - name: Configure AWS Credentials
+      uses: aws-actions/configure-aws-credentials@v4
+      with:
+        aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+        aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+        aws-region: us-east-1
+        
+    - name: Deploy to ECS (Blue-Green)
+      run: |
+        # Blue-green deployment logic
+        aws ecs describe-services \
+          --cluster production-cluster \
+          --services app-service-blue app-service-green \
+          --region us-east-1
+        
+        # Determine current active deployment
+        # Update inactive deployment
+        # Switch load balancer
+        # Clean up old deployment
+        
+    - name: Run Canary Tests
+      run: |
+        # Run canary tests against new deployment
+        # Monitor metrics
+        # Rollback if issues detected
+        
+    - name: Update Deployment Status
+      uses: bobheadxi/deployments@v1
+      with:
+        step: finish
+        env: production
+        token: ${{ secrets.GITHUB_TOKEN }}
+        
+    - name: Notify Teams
+      if: always()
+      uses: aliencube/microsoft-teams-actions@v0.9.0
+      with:
+        webhook_uri: ${{ secrets.TEAMS_WEBHOOK_URI }}
+        title: "Production Deployment ${{ job.status }}"
+        summary: "Deployment of ${{ github.repository }} to production"
+        text: |
+          Version: ${{ steps.get_version.outputs.VERSION }}
+          Commit: ${{ github.sha }}
+          Triggered by: ${{ github.actor }}
+          Status: ${{ job.status }}
+          
+  security-scan:
+    name: Security Scan
+    runs-on: ubuntu-latest
+    needs: validate
+    timeout-minutes: 15
+    
+    steps:
+    - name: Checkout Repository
+      uses: actions/checkout@v4
+      
+    - name: Run Snyk Security Scan
+      uses: snyk/actions/python@master
+      env:
+        SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
+      with:
+        args: --severity-threshold=high
+        
+    - name: Run OWASP Dependency Check
+      uses: dependency-check/Dependency-Check_Action@main
+      with:
+        project: '${{ github.repository }}'
+        path: '.'
+        format: 'HTML'
+        out: 'reports'
+        
+    - name: Upload Security Reports
+      uses: actions/upload-artifact@v4
+      with:
+        name: security-reports
+        path: reports/
+        
+  performance-test:
+    name: Performance Tests
+    runs-on: ubuntu-latest
+    needs: deploy-staging
+    if: github.event_name == 'push' && github.ref == 'refs/heads/develop'
+    timeout-minutes: 45
+    
+    steps:
+    - name: Checkout Repository
+      uses: actions/checkout@v4
+      
+    - name: Run Load Tests
+      uses: arturbosch/k6-performance-action@v1
+      with:
+        filename: tests/performance/load-test.js
+        flags: --out json=test-results.json --duration 5m --vus 100
+        
+    - name: Analyze Results
+      run: |
+        # Analyze performance metrics
+        # Compare with baseline
+        # Fail if performance degrades beyond threshold
+        
+    - name: Upload Performance Results
+      uses: actions/upload-artifact@v4
+      with:
+        name: performance-results
+        path: test-results.json
+        
+  documentation:
+    name: Generate Documentation
+    runs-on: ubuntu-latest
+    needs: test
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    
+    steps:
+    - name: Checkout Repository
+      uses: actions/checkout@v4
+      
+    - name: Setup Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: ${{ env.PYTHON_VERSION }}
+        
+    - name: Generate API Documentation
+      run: |
+        pip install pdoc3
+        pdoc --html --output-dir docs/apidocs src/
+        
+    - name: Deploy to GitHub Pages
+      uses: peaceiris/actions-gh-pages@v3
+      with:
+        github_token: ${{ secrets.GITHUB_TOKEN }}
+        publish_dir: ./docs/apidocs
+        destination_dir: ./apidocs
+        
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+  
+permissions:
+  contents: read
+  packages: write
+  deployments: write
+  pages: write
+  id-token: write
+  security-events: write

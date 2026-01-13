@@ -1,0 +1,319 @@
+# Render.com Blueprint Configuration
+# This file defines the infrastructure-as-code for deploying the application on Render.com
+# Blueprint documentation: https://render.com/docs/blueprint-spec
+
+blueprint:
+  name: codecraft-ai-engine
+  description: High-concurrency AI architectural engine with real-time synthesis capabilities
+
+services:
+  - type: web
+    name: codecraft-api
+    runtime: python
+    region: oregon  # us-west-2
+    plan: standard
+    instanceType: standard
+    numInstances: 2
+    autoDeploy: true
+    healthCheckPath: /health
+    buildCommand: |
+      pip install --upgrade pip
+      pip install -r requirements.txt
+      pip install gunicorn
+    startCommand: gunicorn --worker-class uvicorn.workers.UvicornWorker --workers 4 --bind 0.0.0.0:$PORT --timeout 120 --keep-alive 5 --max-requests 1000 --max-requests-jitter 50 app.main:app
+    envVars:
+      - key: ENVIRONMENT
+        value: production
+        sync: false
+      - key: RENDER
+        value: true
+        sync: false
+      - key: LOG_LEVEL
+        value: INFO
+        sync: false
+      - key: CORS_ORIGINS
+        value: https://codecraft-ai-engine.onrender.com,http://localhost:3000,http://localhost:5173
+        sync: false
+      - key: RATE_LIMIT_REQUESTS
+        value: "100"
+        sync: false
+      - key: RATE_LIMIT_PERIOD
+        value: "60"
+        sync: false
+      - key: TOKEN_BUDGET_PER_REQUEST
+        value: "8192"
+        sync: false
+      - key: MAX_CONCURRENT_REQUESTS
+        value: "50"
+        sync: false
+      - key: CACHE_TTL_SECONDS
+        value: "300"
+        sync: false
+      - key: PYTHONUNBUFFERED
+        value: "true"
+        sync: false
+      - key: PYTHONPATH
+        value: "/opt/render/project/src"
+        sync: false
+    disk:
+      name: data
+      mountPath: /data
+      sizeGB: 1
+    headers:
+      - path: /*
+        name: X-Content-Type-Options
+        value: nosniff
+      - path: /*
+        name: X-Frame-Options
+        value: DENY
+      - path: /*
+        name: X-XSS-Protection
+        value: 1; mode=block
+      - path: /*
+        name: Referrer-Policy
+        value: strict-origin-when-cross-origin
+      - path: /*
+        name: Content-Security-Policy
+        value: "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; font-src 'self' data:;"
+    routes:
+      - type: rewrite
+        source: /api/*
+        destination: /
+    scaling:
+      minInstances: 2
+      maxInstances: 10
+      targetMemoryPercent: 70
+      targetCPUPercent: 75
+      targetRequestsPerSecond: 100
+    alerts:
+      - type: deployment
+        enabled: true
+      - type: cpu
+        threshold: 85
+        duration: 300
+        enabled: true
+      - type: memory
+        threshold: 90
+        duration: 300
+        enabled: true
+      - type: response_time
+        threshold: 5000
+        duration: 300
+        enabled: true
+      - type: error_rate
+        threshold: 5
+        duration: 300
+        enabled: true
+
+  - type: cron
+    name: codecraft-cleanup
+    schedule: "0 */6 * * *"  # Every 6 hours
+    runtime: python
+    region: oregon
+    plan: free
+    buildCommand: pip install -r requirements.txt
+    startCommand: python scripts/cleanup.py
+    envVars:
+      - key: ENVIRONMENT
+        value: production
+        sync: false
+      - key: RENDER
+        value: true
+        sync: false
+      - key: LOG_LEVEL
+        value: INFO
+        sync: false
+      - key: CLEANUP_MAX_AGE_HOURS
+        value: "24"
+        sync: false
+      - key: CLEANUP_BATCH_SIZE
+        value: "1000"
+        sync: false
+
+  - type: redis
+    name: codecraft-cache
+    region: oregon
+    plan: free
+    maxmemoryPolicy: allkeys-lru
+    ipAllowList:
+      - source: 0.0.0.0/0
+        description: Allow all (managed by Render security groups)
+    envVars:
+      - key: REDIS_MAXMEMORY
+        value: "100mb"
+        sync: false
+      - key: REDIS_TIMEOUT
+        value: "300"
+        sync: false
+    alerts:
+      - type: memory
+        threshold: 85
+        duration: 300
+        enabled: true
+      - type: connections
+        threshold: 50
+        duration: 300
+        enabled: true
+
+staticSites:
+  - name: codecraft-docs
+    buildCommand: |
+      npm ci
+      npm run build
+    publishPath: ./dist
+    routes:
+      - type: rewrite
+        source: /*
+        destination: /index.html
+    headers:
+      - path: /*
+        name: Cache-Control
+        value: public, max-age=3600, stale-while-revalidate=86400
+      - path: /assets/*
+        name: Cache-Control
+        value: public, max-age=31536000, immutable
+    envVars:
+      - key: VITE_API_URL
+        value: https://codecraft-api.onrender.com
+        sync: false
+
+envVarGroups:
+  - name: production
+    envVars:
+      - key: DATABASE_URL
+        generateValue: true
+        sync: false
+      - key: REDIS_URL
+        sync: false
+        fromService:
+          type: redis
+          name: codecraft-cache
+          property: connectionString
+      - key: SECRET_KEY
+        generateValue: true
+        sync: false
+      - key: JWT_ALGORITHM
+        value: HS256
+        sync: false
+      - key: JWT_EXPIRATION_MINUTES
+        value: "60"
+        sync: false
+      - key: OPENAI_API_KEY
+        description: "OpenAI API key for AI synthesis capabilities"
+        sync: false
+      - key: ANTHROPIC_API_KEY
+        description: "Anthropic API key for Claude integration"
+        sync: false
+      - key: GITHUB_TOKEN
+        description: "GitHub token for repository operations"
+        sync: false
+      - key: SENTRY_DSN
+        description: "Sentry DSN for error tracking"
+        sync: false
+      - key: NEW_RELIC_LICENSE_KEY
+        description: "New Relic license key for performance monitoring"
+        sync: false
+      - key: NEW_RELIC_APP_NAME
+        value: codecraft-ai-engine
+        sync: false
+
+  - name: development
+    envVars:
+      - key: ENVIRONMENT
+        value: development
+        sync: false
+      - key: LOG_LEVEL
+        value: DEBUG
+        sync: false
+      - key: CORS_ORIGINS
+        value: "*"
+        sync: false
+      - key: RATE_LIMIT_REQUESTS
+        value: "1000"
+        sync: false
+      - key: TOKEN_BUDGET_PER_REQUEST
+        value: "16384"
+        sync: false
+      - key: CACHE_TTL_SECONDS
+        value: "60"
+        sync: false
+
+deployHooks:
+  - name: pre-deploy-validation
+    url: https://codecraft-api.onrender.com/api/health
+    headers:
+      Authorization: Bearer ${SECRET_KEY}
+    timeout: 30
+    retries: 3
+
+  - name: post-deploy-notification
+    url: https://api.slack.com/messaging/webhooks
+    method: POST
+    headers:
+      Content-Type: application/json
+    body: |
+      {
+        "text": "🚀 CodeCraft AI Engine deployed successfully!\n• Environment: ${ENVIRONMENT}\n• Version: ${RENDER_GIT_COMMIT}\n• Service: ${RENDER_SERVICE_NAME}\n• Timestamp: ${RENDER_TIMESTAMP}"
+      }
+
+customDomains:
+  - domain: api.codecraft.ai
+    type: ALIAS
+    service: codecraft-api
+    redirects:
+      - from: www.api.codecraft.ai
+        to: api.codecraft.ai
+        status: 301
+
+  - domain: docs.codecraft.ai
+    type: ALIAS
+    site: codecraft-docs
+    redirects:
+      - from: www.docs.codecraft.ai
+        to: docs.codecraft.ai
+        status: 301
+
+# Render Blueprint Metadata
+metadata:
+  version: 1.0.0
+  schema: https://render.com/blueprint-schema/v1
+  maintainer: CodeCraft AI Team
+  repository: https://github.com/codecraft-ai/engine
+  documentation: https://docs.codecraft.ai/deployment
+  lastUpdated: 2024-01-15
+  compliance:
+    - SOC2
+    - GDPR
+    - CCPA
+  monitoring:
+    - uptime: https://status.codecraft.ai
+    - metrics: https://newrelic.com
+    - logs: https://logdna.com
+    - errors: https://sentry.io
+
+# Infrastructure Notes:
+# 1. The web service uses Gunicorn with Uvicorn workers for async Python support
+# 2. Redis is used for caching, rate limiting, and session storage
+# 3. Cron job runs cleanup tasks every 6 hours
+# 4. Static site hosts documentation and frontend assets
+# 5. Auto-scaling is configured based on CPU, memory, and request metrics
+# 6. Security headers are applied to all services
+# 7. Custom domains with SSL/TLS are automatically provisioned
+# 8. Environment variables are grouped for different environments
+# 9. Deployment hooks provide validation and notifications
+# 10. All services are deployed in the Oregon region (us-west-2) for low latency
+
+# Cost Estimation (Monthly):
+# - Web Service (Standard Plan, 2 instances): ~$25-50
+# - Redis (Free Plan): $0
+# - Cron Job (Free Plan): $0
+# - Static Site (Free Plan): $0
+# - Custom Domains: $0
+# - Total Estimated: $25-50/month
+
+# Scaling Considerations:
+# 1. As traffic grows, increase instance count (max 10)
+# 2. Upgrade Redis plan if cache needs exceed 100MB
+# 3. Add database service (PostgreSQL) when persistent storage is needed
+# 4. Implement CDN for static assets if global traffic increases
+# 5. Add background worker services for async task processing

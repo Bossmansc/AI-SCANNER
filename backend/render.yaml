@@ -1,0 +1,534 @@
+# Render Blueprint for High-Concurrency AI Backend
+# This file defines the infrastructure-as-code for deploying the CodeCraft AI backend
+# on Render's cloud platform with auto-scaling and managed services.
+
+services:
+  # Primary FastAPI Backend Service
+  - type: web
+    name: codecraft-ai-backend
+    env: python
+    region: oregon  # us-west-2
+    plan: standard  # For production workloads
+    autoDeploy: true
+    buildCommand: |
+      pip install --upgrade pip
+      pip install -r requirements.txt
+      pip install gunicorn
+    startCommand: gunicorn main:app --workers 4 --worker-class uvicorn.workers.UvicornWorker --bind 0.0.0.0:8000 --timeout 120
+    healthCheckPath: /health
+    envVars:
+      - key: ENVIRONMENT
+        value: production
+      - key: LOG_LEVEL
+        value: INFO
+      - key: CORS_ORIGINS
+        value: https://codecraft-ai.onrender.com,http://localhost:3000
+      - key: RATE_LIMIT_REQUESTS
+        value: "100"
+      - key: RATE_LIMIT_PERIOD
+        value: "60"
+      - key: JWT_SECRET_KEY
+        generateValue: true
+      - key: JWT_ALGORITHM
+        value: HS256
+      - key: JWT_ACCESS_TOKEN_EXPIRE_MINUTES
+        value: "30"
+      - key: OPENAI_API_KEY
+        sync: false  # Must be set manually in Render dashboard
+      - key: ANTHROPIC_API_KEY
+        sync: false  # Must be set manually in Render dashboard
+      - key: DATABASE_URL
+        fromDatabase:
+          name: codecraft-db
+          property: connectionString
+      - key: REDIS_URL
+        fromService:
+          name: codecraft-redis
+          type: redis
+          property: connectionString
+    scaling:
+      minInstances: 2
+      maxInstances: 10
+      targetMemoryPercent: 70
+      targetCPUPercent: 75
+    disk:
+      name: codecraft-storage
+      mountPath: /data
+      sizeGB: 10
+    headers:
+      - path: /*
+        name: X-Content-Type-Options
+        value: nosniff
+      - path: /*
+        name: X-Frame-Options
+        value: DENY
+      - path: /*
+        name: X-XSS-Protection
+        value: 1; mode=block
+      - path: /*
+        name: Strict-Transport-Security
+        value: max-age=31536000; includeSubDomains
+    routes:
+      - type: rewrite
+        source: /api/*
+        destination: /
+    advanced:
+      dockerfilePath: ./Dockerfile.backend
+      preDeployCommand: python scripts/pre_deploy.py
+      postDeployCommand: python scripts/post_deploy.py
+
+  # Background Worker for Async Tasks
+  - type: worker
+    name: codecraft-worker
+    env: python
+    region: oregon
+    plan: standard
+    autoDeploy: true
+    buildCommand: pip install -r requirements.txt
+    startCommand: python worker/main.py
+    envVars:
+      - key: ENVIRONMENT
+        value: production
+      - key: WORKER_QUEUE
+        value: default
+      - key: DATABASE_URL
+        fromDatabase:
+          name: codecraft-db
+          property: connectionString
+      - key: REDIS_URL
+        fromService:
+          name: codecraft-redis
+          type: redis
+          property: connectionString
+      - key: OPENAI_API_KEY
+        sync: false
+      - key: ANTHROPIC_API_KEY
+        sync: false
+    scaling:
+      minInstances: 1
+      maxInstances: 5
+      targetMemoryPercent: 80
+    disk:
+      name: worker-storage
+      mountPath: /worker-data
+      sizeGB: 5
+
+  # WebSocket Service for Real-time Updates
+  - type: web
+    name: codecraft-websocket
+    env: python
+    region: oregon
+    plan: standard
+    autoDeploy: true
+    buildCommand: pip install -r requirements.txt
+    startCommand: python websocket/main.py
+    envVars:
+      - key: ENVIRONMENT
+        value: production
+      - key: WS_PORT
+        value: "8001"
+      - key: REDIS_URL
+        fromService:
+          name: codecraft-redis
+          type: redis
+          property: connectionString
+    scaling:
+      minInstances: 2
+      maxInstances: 8
+      targetMemoryPercent: 65
+    healthCheckPath: /ws/health
+
+databases:
+  # Primary PostgreSQL Database
+  - name: codecraft-db
+    databaseName: codecraft_production
+    user: codecraft_admin
+    region: oregon
+    plan: standard  # 1GB RAM, 1 vCPU, 10GB storage
+    postgresMajorVersion: "15"
+    ipAllowList:
+      - source: 0.0.0.0/0
+        description: Allow all for Render services
+    advanced:
+      maxConnections: 100
+      maintenanceWindow: sat:04:00
+      terminationProtection: true
+    extensions:
+      - pg_stat_statements
+      - pgcrypto
+      - uuid-ossp
+    backups:
+      schedule: "0 2 * * *"  # Daily at 2 AM
+      retentionDays: 30
+
+  # Redis Cache and Message Queue
+  - name: codecraft-redis
+    type: redis
+    region: oregon
+    plan: standard  # 256MB RAM
+    ipAllowList:
+      - source: 0.0.0.0/0
+        description: Allow all for Render services
+    persistence: enabled
+    evictionPolicy: allkeys-lru
+    maxmemoryPolicy: volatile-lru
+    advanced:
+      timeout: "300"
+      tcpKeepalive: "60"
+
+  # MongoDB for Document Storage
+  - name: codecraft-mongodb
+    type: mongodb
+    region: oregon
+    plan: standard  # 1GB RAM, 1 vCPU, 10GB storage
+    databaseName: codecraft_documents
+    ipAllowList:
+      - source: 0.0.0.0/0
+        description: Allow all for Render services
+    advanced:
+      journaling: enabled
+      oplogSizeMB: 1024
+      wiredTigerCacheSizeGB: 0.5
+
+staticSites:
+  # Frontend Deployment (if using static build)
+  - name: codecraft-frontend
+    buildCommand: |
+      npm ci
+      npm run build
+    publishPath: ./build
+    routes:
+      - type: rewrite
+        source: /*
+        destination: /index.html
+    headers:
+      - path: /*
+        name: Cache-Control
+        value: public, max-age=31536000, immutable
+      - path: /index.html
+        name: Cache-Control
+        value: public, max-age=0, must-revalidate
+    envVars:
+      - key: REACT_APP_API_URL
+        value: https://codecraft-ai-backend.onrender.com
+      - key: REACT_APP_WS_URL
+        value: wss://codecraft-websocket.onrender.com
+
+crons:
+  # Database Maintenance Job
+  - name: db-maintenance
+    schedule: "0 3 * * *"  # Daily at 3 AM
+    command: python scripts/db_maintenance.py
+    service: codecraft-worker
+
+  # Cache Warming Job
+  - name: cache-warm
+    schedule: "*/15 * * * *"  # Every 15 minutes
+    command: python scripts/cache_warm.py
+    service: codecraft-worker
+
+  # Metrics Collection Job
+  - name: collect-metrics
+    schedule: "*/5 * * * *"  # Every 5 minutes
+    command: python scripts/collect_metrics.py
+    service: codecraft-worker
+
+  # Backup Verification Job
+  - name: verify-backups
+    schedule: "0 4 * * *"  # Daily at 4 AM
+    command: python scripts/verify_backups.py
+    service: codecraft-worker
+
+privateServices:
+  # Internal API Gateway (optional)
+  - type: private
+    name: internal-gateway
+    env: python
+    region: oregon
+    autoDeploy: true
+    buildCommand: pip install -r requirements.txt
+    startCommand: python internal/gateway.py
+    envVars:
+      - key: INTERNAL_API_KEY
+        generateValue: true
+    scaling:
+      minInstances: 1
+      maxInstances: 3
+
+environmentGroups:
+  # Shared environment variables across all services
+  - name: codecraft-shared
+    envVars:
+      - key: APP_VERSION
+        value: "1.0.0"
+      - key: SERVICE_NAME
+        value: codecraft-ai
+      - key: DEPLOYMENT_ID
+        sync: false
+      - key: SENTRY_DSN
+        sync: false
+      - key: NEW_RELIC_LICENSE_KEY
+        sync: false
+    services:
+      - codecraft-ai-backend
+      - codecraft-worker
+      - codecraft-websocket
+
+disk:
+  # Shared storage volumes
+  - name: model-cache
+    mountPath: /models
+    sizeGB: 20
+    services:
+      - codecraft-ai-backend
+      - codecraft-worker
+
+  - name: temp-storage
+    mountPath: /tmp
+    sizeGB: 5
+    services:
+      - codecraft-ai-backend
+      - codecraft-worker
+      - codecraft-websocket
+
+  - name: logs
+    mountPath: /var/log/codecraft
+    sizeGB: 10
+    services:
+      - codecraft-ai-backend
+      - codecraft-worker
+      - codecraft-websocket
+
+# Render Blueprint metadata
+blueprint:
+  name: CodeCraft AI Platform
+  description: High-concurrency AI code generation and analysis platform
+  version: "1.0"
+  tags:
+    - ai
+    - code-generation
+    - fastapi
+    - python
+    - high-availability
+  notifications:
+    slack:
+      channel: deployments
+      webhook: ${SLACK_WEBHOOK_URL}
+    email:
+      - admin@codecraft.ai
+  monitoring:
+    uptime: true
+    metrics: true
+    logs: true
+    alerts:
+      - type: high-error-rate
+        threshold: "5%"
+      - type: high-latency
+        threshold: "1000ms"
+      - type: low-disk-space
+        threshold: "20%"
+  costEstimate:
+    monthly: "$150-300"
+    breakdown:
+      - service: codecraft-ai-backend
+        estimate: "$50-100"
+      - service: codecraft-worker
+        estimate: "$30-60"
+      - service: codecraft-websocket
+        estimate: "$30-60"
+      - database: codecraft-db
+        estimate: "$25"
+      - redis: codecraft-redis
+        estimate: "$15"
+      - mongodb: codecraft-mongodb
+        estimate: "$25"
+
+# Deployment strategies
+deployments:
+  production:
+    strategy: rolling
+    healthCheck:
+      path: /health
+      initialDelay: 30
+      period: 10
+      timeout: 5
+      successThreshold: 1
+      failureThreshold: 3
+    rollback:
+      enabled: true
+      onFailure: true
+      automatic: true
+    canary:
+      enabled: false
+      percentage: 10
+      duration: 300
+
+  staging:
+    strategy: blue-green
+    services:
+      - codecraft-ai-backend
+      - codecraft-worker
+    healthCheck:
+      path: /health
+      initialDelay: 20
+    rollback:
+      enabled: true
+
+# Custom domains configuration (example)
+domains:
+  - name: api.codecraft.ai
+    service: codecraft-ai-backend
+    redirects:
+      - from: www.api.codecraft.ai
+        to: api.codecraft.ai
+        status: 301
+
+  - name: ws.codecraft.ai
+    service: codecraft-websocket
+    ssl:
+      type: managed
+      autoRenew: true
+
+  - name: codecraft.ai
+    staticSite: codecraft-frontend
+    redirects:
+      - from: www.codecraft.ai
+        to: codecraft.ai
+        status: 301
+
+# Security configuration
+security:
+  headers:
+    enabled: true
+    csp:
+      default-src: "'self'"
+      script-src: "'self' 'unsafe-inline'"
+      style-src: "'self' 'unsafe-inline'"
+      img-src: "'self' data: https:"
+      connect-src: "'self' wss:"
+
+  rateLimiting:
+    enabled: true
+    backend: redis
+    strategies:
+      - name: ip-based
+        limit: 100
+        period: 60
+      - name: token-based
+        limit: 1000
+        period: 3600
+
+  authentication:
+    jwt:
+      enabled: true
+      algorithm: HS256
+    apiKeys:
+      enabled: true
+      rotation: 90
+
+# Backup and disaster recovery
+backup:
+  databases:
+    - name: codecraft-db
+      retention: 30
+      encryption: enabled
+    - name: codecraft-mongodb
+      retention: 30
+      encryption: enabled
+
+  volumes:
+    - name: model-cache
+      schedule: "0 1 * * *"
+      retention: 7
+    - name: logs
+      schedule: "0 2 * * 0"  # Weekly on Sunday at 2 AM
+      retention: 90
+
+  disasterRecovery:
+    enabled: true
+    region: frankfurt  # eu-central-1 as DR region
+    rpo: 3600  # 1 hour Recovery Point Objective
+    rto: 7200  # 2 hour Recovery Time Objective
+
+# Observability and monitoring
+observability:
+  logging:
+    level: INFO
+    retention: 30
+    export:
+      - datadog
+      - splunk
+
+  metrics:
+    collection: enabled
+    interval: 60
+    exporters:
+      - prometheus
+      - cloudwatch
+
+  tracing:
+    enabled: true
+    sampler: parentbased_always_on
+    exporters:
+      - jaeger
+      - zipkin
+
+  alerts:
+    - name: high-cpu
+      condition: cpu > 80%
+      duration: 5m
+      channels: [slack, email]
+    - name: high-memory
+      condition: memory > 85%
+      duration: 5m
+      channels: [slack]
+    - name: service-down
+      condition: health_check_failed
+      duration: 2m
+      channels: [slack, email, pagerduty]
+
+# Cost optimization
+costOptimization:
+  autoScaling:
+    enabled: true
+    metrics:
+      - cpu
+      - memory
+      - requests
+    scaleDownDelay: 300
+    scaleUpDelay: 60
+
+  scheduling:
+    development:
+      stopAt: "22:00"
+      startAt: "08:00"
+      timezone: "America/Los_Angeles"
+    staging:
+      stopAt: "00:00"
+      startAt: "06:00"
+      timezone: "UTC"
+
+  resourceOptimization:
+    memory:
+      request: 512Mi
+      limit: 1024Mi
+    cpu:
+      request: 250m
+      limit: 500m
+
+# Documentation links
+documentation:
+  api: https://docs.codecraft.ai/api
+  deployment: https://docs.codecraft.ai/deployment
+  monitoring: https://docs.codecraft.ai/monitoring
+  troubleshooting: https://docs.codecraft.ai/troubleshooting
+  support: https://support.codecraft.ai
+
+# Render-specific optimizations
+renderOptimizations:
+  buildCache: true
+  parallelBuilds: true
+  incrementalBuilds: true
+  dockerLayerCaching: true
+  networkOptimization: true
+  staticAssetOptimization: true
