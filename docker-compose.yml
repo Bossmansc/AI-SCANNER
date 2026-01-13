@@ -1,278 +1,282 @@
 version: '3.8'
 
 services:
-  # PostgreSQL Database
-  postgres:
-    image: postgres:15-alpine
-    container_name: app_postgres
-    environment:
-      POSTGRES_USER: ${DB_USER:-app_user}
-      POSTGRES_PASSWORD: ${DB_PASSWORD:-secure_password}
-      POSTGRES_DB: ${DB_NAME:-app_db}
-    ports:
-      - "${DB_PORT:-5432}:5432"
-    volumes:
-      - postgres_data:/var/lib/postgresql/data
-      - ./init-db:/docker-entrypoint-initdb.d
-    networks:
-      - app_network
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${DB_USER:-app_user}"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-      start_period: 30s
-    restart: unless-stopped
-
-  # Redis Cache
-  redis:
-    image: redis:7-alpine
-    container_name: app_redis
-    ports:
-      - "${REDIS_PORT:-6379}:6379"
-    volumes:
-      - redis_data:/data
-      - ./redis.conf:/usr/local/etc/redis/redis.conf
-    command: redis-server /usr/local/etc/redis/redis.conf
-    networks:
-      - app_network
-    healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-    restart: unless-stopped
-
-  # Main Application Backend (FastAPI/Node.js/Spring Boot - configurable)
-  backend:
+  # Primary Application Service
+  app:
     build:
-      context: ./backend
-      dockerfile: Dockerfile.dev
-      args:
-        - NODE_ENV=development
-        - PYTHON_VERSION=3.11
-    container_name: app_backend
+      context: .
+      dockerfile: Dockerfile
+      target: development
+    container_name: app_dev
+    restart: unless-stopped
     ports:
-      - "${BACKEND_PORT:-8000}:8000"
-    environment:
-      - DB_HOST=postgres
-      - DB_PORT=5432
-      - DB_USER=${DB_USER:-app_user}
-      - DB_PASSWORD=${DB_PASSWORD:-secure_password}
-      - DB_NAME=${DB_NAME:-app_db}
-      - REDIS_HOST=redis
-      - REDIS_PORT=6379
-      - JWT_SECRET=${JWT_SECRET:-dev_jwt_secret_key_change_in_production}
-      - DEBUG=${DEBUG:-true}
-      - LOG_LEVEL=${LOG_LEVEL:-DEBUG}
+      - "8000:8000"
+      - "5678:5678"  # Debug port for Python debuggers
     volumes:
-      - ./backend:/app
-      - backend_node_modules:/app/node_modules
-      - backend_python_packages:/usr/local/lib/python3.11/site-packages
+      - .:/app
+      - app_pip_cache:/root/.cache/pip
+    environment:
+      - ENVIRONMENT=development
+      - DEBUG=True
+      - PYTHONUNBUFFERED=1
+      - PYTHONDONTWRITEBYTECODE=1
+      - REDIS_URL=redis://redis:6379/0
+      - MAIL_SERVER=mailhog
+      - MAIL_PORT=1025
+      - MAIL_USE_TLS=False
+      - MAIL_USE_SSL=False
+      - DATABASE_URL=postgresql://postgres:postgres@db:5432/app_db
     depends_on:
-      postgres:
-        condition: service_healthy
-      redis:
-        condition: service_healthy
+      - db
+      - redis
+      - mailhog
     networks:
       - app_network
+    command: >
+      sh -c "python manage.py migrate &&
+             python manage.py runserver 0.0.0.0:8000"
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health/"]
       interval: 30s
       timeout: 10s
       retries: 3
       start_period: 40s
-    restart: unless-stopped
-    stdin_open: true
-    tty: true
 
-  # Frontend Application (React/Vue/Angular - configurable)
-  frontend:
-    build:
-      context: ./frontend
-      dockerfile: Dockerfile.dev
-      args:
-        - NODE_ENV=development
-    container_name: app_frontend
+  # PostgreSQL Database
+  db:
+    image: postgres:15-alpine
+    container_name: postgres_db
+    restart: unless-stopped
     ports:
-      - "${FRONTEND_PORT:-3000}:3000"
+      - "5432:5432"
     environment:
-      - REACT_APP_API_URL=http://localhost:8000/api
-      - REACT_APP_WS_URL=ws://localhost:8000/ws
-      - NODE_ENV=development
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD=postgres
+      - POSTGRES_DB=app_db
     volumes:
-      - ./frontend:/app
-      - frontend_node_modules:/app/node_modules
-    depends_on:
-      - backend
+      - postgres_data:/var/lib/postgresql/data
+      - ./docker/postgres/init.sql:/docker-entrypoint-initdb.d/init.sql
     networks:
       - app_network
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:3000"]
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Redis Cache and Message Broker
+  redis:
+    image: redis:7-alpine
+    container_name: redis_cache
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    command: redis-server --appendonly yes --requirepass ${REDIS_PASSWORD:-redispass}
+    volumes:
+      - redis_data:/data
+      - ./docker/redis/redis.conf:/usr/local/etc/redis/redis.conf
+    networks:
+      - app_network
+    healthcheck:
+      test: ["CMD", "redis-cli", "--raw", "incr", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+
+  # Celery Worker for Async Tasks
+  celery_worker:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: development
+    container_name: celery_worker
+    restart: unless-stopped
+    volumes:
+      - .:/app
+      - app_pip_cache:/root/.cache/pip
+    environment:
+      - ENVIRONMENT=development
+      - DEBUG=True
+      - PYTHONUNBUFFERED=1
+      - REDIS_URL=redis://redis:6379/0
+      - CELERY_BROKER_URL=redis://redis:6379/1
+      - CELERY_RESULT_BACKEND=redis://redis:6379/2
+      - DATABASE_URL=postgresql://postgres:postgres@db:5432/app_db
+    depends_on:
+      - db
+      - redis
+    networks:
+      - app_network
+    command: celery -A config.celery_app worker --loglevel=info --concurrency=4
+    healthcheck:
+      test: ["CMD", "celery", "-A", "config.celery_app", "inspect", "ping"]
       interval: 30s
       timeout: 10s
       retries: 3
-      start_period: 60s
-    restart: unless-stopped
 
-  # NGINX Reverse Proxy (optional, for production-like routing)
-  nginx:
-    image: nginx:1.25-alpine
-    container_name: app_nginx
+  # Celery Beat for Scheduled Tasks
+  celery_beat:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: development
+    container_name: celery_beat
+    restart: unless-stopped
+    volumes:
+      - .:/app
+      - app_pip_cache:/root/.cache/pip
+    environment:
+      - ENVIRONMENT=development
+      - DEBUG=True
+      - PYTHONUNBUFFERED=1
+      - REDIS_URL=redis://redis:6379/0
+      - CELERY_BROKER_URL=redis://redis:6379/1
+      - CELERY_RESULT_BACKEND=redis://redis:6379/2
+      - DATABASE_URL=postgresql://postgres:postgres@db:5432/app_db
+    depends_on:
+      - db
+      - redis
+      - celery_worker
+    networks:
+      - app_network
+    command: celery -A config.celery_app beat --loglevel=info
+    healthcheck:
+      test: ["CMD-SHELL", "test -f /tmp/celerybeat.pid"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+  # MailHog for Email Testing
+  mailhog:
+    image: mailhog/mailhog:v1.0.1
+    container_name: mailhog
+    restart: unless-stopped
+    ports:
+      - "1025:1025"  # SMTP server
+      - "8025:8025"  # Web UI
+    networks:
+      - app_network
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:8025"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+
+  # pgAdmin for Database Management
+  pgadmin:
+    image: dpage/pgadmin4:7
+    container_name: pgadmin
+    restart: unless-stopped
+    ports:
+      - "5050:80"
+    environment:
+      - PGADMIN_DEFAULT_EMAIL=admin@example.com
+      - PGADMIN_DEFAULT_PASSWORD=admin
+      - PGADMIN_CONFIG_SERVER_MODE=False
+      - PGADMIN_CONFIG_MASTER_PASSWORD_REQUIRED=False
+    volumes:
+      - pgadmin_data:/var/lib/pgadmin
+      - ./docker/pgadmin/servers.json:/pgadmin4/servers.json
+    depends_on:
+      - db
+    networks:
+      - app_network
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:80"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+  # Redis Commander for Redis Management
+  redis_commander:
+    image: rediscommander/redis-commander:latest
+    container_name: redis_commander
+    restart: unless-stopped
+    ports:
+      - "8081:8081"
+    environment:
+      - REDIS_HOSTS=local:redis:6379:0:redispass
+      - HTTP_USER=
+      - HTTP_PASSWORD=
+      - REDIS_PORT=6379
+      - REDIS_PASSWORD=redispass
+    depends_on:
+      - redis
+    networks:
+      - app_network
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:8081"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+  # Traefik for Reverse Proxy (Optional)
+  traefik:
+    image: traefik:v2.10
+    container_name: traefik
+    restart: unless-stopped
     ports:
       - "80:80"
       - "443:443"
+      - "8080:8080"  # Dashboard
+    command:
+      - "--api.dashboard=true"
+      - "--providers.docker=true"
+      - "--providers.docker.exposedbydefault=false"
+      - "--entrypoints.web.address=:80"
+      - "--entrypoints.websecure.address=:443"
+      - "--certificatesresolvers.myresolver.acme.tlschallenge=true"
+      - "--certificatesresolvers.myresolver.acme.email=admin@example.com"
+      - "--certificatesresolvers.myresolver.acme.storage=/letsencrypt/acme.json"
     volumes:
-      - ./nginx/nginx.conf:/etc/nginx/nginx.conf
-      - ./nginx/conf.d:/etc/nginx/conf.d
-      - ./ssl:/etc/nginx/ssl
-      - ./frontend/build:/usr/share/nginx/html
-    depends_on:
-      - backend
-      - frontend
+      - "/var/run/docker.sock:/var/run/docker.sock:ro"
+      - traefik_data:/letsencrypt
     networks:
       - app_network
-    restart: unless-stopped
-
-  # Elasticsearch for logging and search
-  elasticsearch:
-    image: elasticsearch:8.11.0
-    container_name: app_elasticsearch
-    environment:
-      - discovery.type=single-node
-      - xpack.security.enabled=false
-      - "ES_JAVA_OPTS=-Xms512m -Xmx512m"
-    ports:
-      - "${ELASTIC_PORT:-9200}:9200"
-    volumes:
-      - elasticsearch_data:/usr/share/elasticsearch/data
-    networks:
-      - app_network
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.dashboard.rule=Host(`traefik.localhost`)"
+      - "traefik.http.routers.dashboard.service=api@internal"
+      - "traefik.http.routers.dashboard.middlewares=auth"
+      - "traefik.http.middlewares.auth.basicauth.users=admin:$$apr1$$9Cv/OMGj$$ZomWQzuQbL.3TRCS81AI1/"  # password: admin
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:9200"]
+      test: ["CMD", "traefik", "healthcheck", "--ping"]
       interval: 30s
-      timeout: 10s
-      retries: 5
-      start_period: 60s
-    restart: unless-stopped
+      timeout: 5s
+      retries: 3
 
-  # Kibana for Elasticsearch visualization
-  kibana:
-    image: kibana:8.11.0
-    container_name: app_kibana
-    environment:
-      - ELASTICSEARCH_HOSTS=http://elasticsearch:9200
+  # Flower for Celery Monitoring
+  flower:
+    image: mher/flower:1.2
+    container_name: flower
+    restart: unless-stopped
     ports:
-      - "${KIBANA_PORT:-5601}:5601"
+      - "5555:5555"
+    environment:
+      - CELERY_BROKER_URL=redis://redis:6379/1
+      - CELERY_RESULT_BACKEND=redis://redis:6379/2
+      - FLOWER_BASIC_AUTH=admin:flowerpass
     depends_on:
-      elasticsearch:
-        condition: service_healthy
+      - redis
+      - celery_worker
     networks:
       - app_network
-    restart: unless-stopped
-
-  # RabbitMQ for message queueing
-  rabbitmq:
-    image: rabbitmq:3.12-management-alpine
-    container_name: app_rabbitmq
-    environment:
-      - RABBITMQ_DEFAULT_USER=${RABBITMQ_USER:-admin}
-      - RABBITMQ_DEFAULT_PASS=${RABBITMQ_PASSWORD:-admin_pass}
-    ports:
-      - "${RABBITMQ_PORT:-5672}:5672"
-      - "${RABBITMQ_MANAGEMENT_PORT:-15672}:15672"
-    volumes:
-      - rabbitmq_data:/var/lib/rabbitmq
-    networks:
-      - app_network
+    command: celery flower --broker=redis://redis:6379/1 --port=5555
     healthcheck:
-      test: ["CMD", "rabbitmq-diagnostics", "ping"]
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:5555"]
       interval: 30s
-      timeout: 10s
-      retries: 5
-    restart: unless-stopped
+      timeout: 5s
+      retries: 3
 
-  # Celery Worker (for Python backend)
-  celery_worker:
-    build:
-      context: ./backend
-      dockerfile: Dockerfile.dev
-    container_name: app_celery_worker
-    command: celery -A app.celery worker --loglevel=info
-    environment:
-      - DB_HOST=postgres
-      - DB_PORT=5432
-      - DB_USER=${DB_USER:-app_user}
-      - DB_PASSWORD=${DB_PASSWORD:-secure_password}
-      - DB_NAME=${DB_NAME:-app_db}
-      - REDIS_HOST=redis
-      - REDIS_PORT=6379
-      - CELERY_BROKER_URL=redis://redis:6379/0
-      - CELERY_RESULT_BACKEND=redis://redis:6379/0
-    volumes:
-      - ./backend:/app
-      - backend_python_packages:/usr/local/lib/python3.11/site-packages
-    depends_on:
-      postgres:
-        condition: service_healthy
-      redis:
-        condition: service_healthy
-      rabbitmq:
-        condition: service_healthy
-    networks:
-      - app_network
-    restart: unless-stopped
-
-  # Celery Beat (for scheduled tasks)
-  celery_beat:
-    build:
-      context: ./backend
-      dockerfile: Dockerfile.dev
-    container_name: app_celery_beat
-    command: celery -A app.celery beat --loglevel=info
-    environment:
-      - DB_HOST=postgres
-      - DB_PORT=5432
-      - DB_USER=${DB_USER:-app_user}
-      - DB_PASSWORD=${DB_PASSWORD:-secure_password}
-      - DB_NAME=${DB_NAME:-app_db}
-      - REDIS_HOST=redis
-      - REDIS_PORT=6379
-      - CELERY_BROKER_URL=redis://redis:6379/0
-      - CELERY_RESULT_BACKEND=redis://redis:6379/0
-    volumes:
-      - ./backend:/app
-      - backend_python_packages:/usr/local/lib/python3.11/site-packages
-    depends_on:
-      postgres:
-        condition: service_healthy
-      redis:
-        condition: service_healthy
-      rabbitmq:
-        condition: service_healthy
-    networks:
-      - app_network
-    restart: unless-stopped
-
-  # MailHog for email testing
-  mailhog:
-    image: mailhog/mailhog
-    container_name: app_mailhog
-    ports:
-      - "${MAILHOG_SMTP_PORT:-1025}:1025"
-      - "${MAILHOG_WEB_PORT:-8025}:8025"
-    networks:
-      - app_network
-    restart: unless-stopped
-
-  # Prometheus for metrics
+  # Prometheus for Metrics
   prometheus:
     image: prom/prometheus:latest
-    container_name: app_prometheus
+    container_name: prometheus
+    restart: unless-stopped
     ports:
-      - "${PROMETHEUS_PORT:-9090}:9090"
+      - "9090:9090"
     volumes:
-      - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml
+      - ./docker/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml
       - prometheus_data:/prometheus
     command:
       - '--config.file=/etc/prometheus/prometheus.yml'
@@ -283,51 +287,110 @@ services:
       - '--web.enable-lifecycle'
     networks:
       - app_network
-    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:9090/-/healthy"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
 
-  # Grafana for metrics visualization
+  # Grafana for Metrics Visualization
   grafana:
     image: grafana/grafana:latest
-    container_name: app_grafana
+    container_name: grafana
+    restart: unless-stopped
     ports:
-      - "${GRAFANA_PORT:-3001}:3000"
+      - "3000:3000"
     environment:
-      - GF_SECURITY_ADMIN_USER=${GRAFANA_USER:-admin}
-      - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_PASSWORD:-admin}
+      - GF_SECURITY_ADMIN_PASSWORD=admin
       - GF_INSTALL_PLUGINS=grafana-piechart-panel
     volumes:
       - grafana_data:/var/lib/grafana
-      - ./grafana/provisioning:/etc/grafana/provisioning
+      - ./docker/grafana/dashboards:/etc/grafana/provisioning/dashboards
+      - ./docker/grafana/datasources:/etc/grafana/provisioning/datasources
     depends_on:
       - prometheus
     networks:
       - app_network
-    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:3000/api/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
 
-  # Jaeger for distributed tracing
-  jaeger:
-    image: jaegertracing/all-in-one:latest
-    container_name: app_jaeger
+  # Elasticsearch for Logging and Search
+  elasticsearch:
+    image: elasticsearch:8.11.0
+    container_name: elasticsearch
+    restart: unless-stopped
     ports:
-      - "${JAEGER_UI_PORT:-16686}:16686"
-      - "${JAEGER_COLLECTOR_PORT:-14268}:14268"
-      - "${JAEGER_AGENT_PORT:-6831}:6831/udp"
+      - "9200:9200"
+      - "9300:9300"
     environment:
-      - COLLECTOR_OTLP_ENABLED=true
+      - discovery.type=single-node
+      - xpack.security.enabled=false
+      - "ES_JAVA_OPTS=-Xms512m -Xmx512m"
+    volumes:
+      - elasticsearch_data:/usr/share/elasticsearch/data
     networks:
       - app_network
-    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "curl -s http://localhost:9200/_cluster/health | grep -q '\"status\":\"green\"'"]
+      interval: 30s
+      timeout: 10s
+      retries: 10
+      start_period: 60s
 
-  # MinIO for S3-compatible object storage
+  # Logstash for Log Processing
+  logstash:
+    image: logstash:8.11.0
+    container_name: logstash
+    restart: unless-stopped
+    ports:
+      - "5000:5000"
+    volumes:
+      - ./docker/logstash/logstash.conf:/usr/share/logstash/pipeline/logstash.conf
+    environment:
+      - LS_JAVA_OPTS=-Xms256m -Xmx256m
+    depends_on:
+      - elasticsearch
+    networks:
+      - app_network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9600/"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # Kibana for Log Visualization
+  kibana:
+    image: kibana:8.11.0
+    container_name: kibana
+    restart: unless-stopped
+    ports:
+      - "5601:5601"
+    environment:
+      - ELASTICSEARCH_HOSTS=http://elasticsearch:9200
+    depends_on:
+      - elasticsearch
+    networks:
+      - app_network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:5601/api/status"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # MinIO for S3-Compatible Object Storage
   minio:
     image: minio/minio:latest
-    container_name: app_minio
+    container_name: minio
+    restart: unless-stopped
     ports:
-      - "${MINIO_API_PORT:-9000}:9000"
-      - "${MINIO_CONSOLE_PORT:-9001}:9001"
+      - "9000:9000"
+      - "9001:9001"
     environment:
-      - MINIO_ROOT_USER=${MINIO_ROOT_USER:-minioadmin}
-      - MINIO_ROOT_PASSWORD=${MINIO_ROOT_PASSWORD:-minioadmin}
+      - MINIO_ROOT_USER=minioadmin
+      - MINIO_ROOT_PASSWORD=minioadmin
     volumes:
       - minio_data:/data
     command: server /data --console-address ":9001"
@@ -336,124 +399,82 @@ services:
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
       interval: 30s
-      timeout: 20s
+      timeout: 5s
       retries: 3
-    restart: unless-stopped
 
-  # PostgreSQL Admin (pgAdmin)
-  pgadmin:
-    image: dpage/pgadmin4:latest
-    container_name: app_pgadmin
-    environment:
-      PGADMIN_DEFAULT_EMAIL: ${PGADMIN_EMAIL:-admin@admin.com}
-      PGADMIN_DEFAULT_PASSWORD: ${PGADMIN_PASSWORD:-admin}
-      PGADMIN_CONFIG_SERVER_MODE: 'False'
-    ports:
-      - "${PGADMIN_PORT:-5050}:80"
+  # MinIO Client for Management
+  minio_client:
+    image: minio/mc:latest
+    container_name: minio_client
+    restart: unless-stopped
     volumes:
-      - pgadmin_data:/var/lib/pgadmin
+      - ./docker/minio/mc_config.json:/root/.mc/config.json
     depends_on:
-      - postgres
+      - minio
     networks:
       - app_network
-    restart: unless-stopped
+    entrypoint: >
+      /bin/sh -c "
+      until /usr/bin/mc alias set minio http://minio:9000 minioadmin minioadmin; do
+        echo 'Waiting for MinIO...'
+        sleep 2
+      done &&
+      /usr/bin/mc mb minio/app-bucket &&
+      /usr/bin/mc policy set public minio/app-bucket &&
+      tail -f /dev/null
+      "
 
-  # MongoDB (optional document database)
-  mongodb:
-    image: mongo:7.0
-    container_name: app_mongodb
+  # Nginx for Static Files and Load Balancing (Optional)
+  nginx:
+    image: nginx:alpine
+    container_name: nginx
+    restart: unless-stopped
     ports:
-      - "${MONGODB_PORT:-27017}:27017"
-    environment:
-      MONGO_INITDB_ROOT_USERNAME: ${MONGO_USER:-admin}
-      MONGO_INITDB_ROOT_PASSWORD: ${MONGO_PASSWORD:-admin}
+      - "8080:80"
     volumes:
-      - mongodb_data:/data/db
-    networks:
-      - app_network
-    restart: unless-stopped
-
-  # MongoDB Express (web admin for MongoDB)
-  mongo-express:
-    image: mongo-express:latest
-    container_name: app_mongo_express
-    ports:
-      - "${MONGO_EXPRESS_PORT:-8081}:8081"
-    environment:
-      ME_CONFIG_MONGODB_ADMINUSERNAME: ${MONGO_USER:-admin}
-      ME_CONFIG_MONGODB_ADMINPASSWORD: ${MONGO_PASSWORD:-admin}
-      ME_CONFIG_MONGODB_SERVER: mongodb
-      ME_CONFIG_BASICAUTH_USERNAME: ${MONGO_EXPRESS_USER:-admin}
-      ME_CONFIG_BASICAUTH_PASSWORD: ${MONGO_EXPRESS_PASSWORD:-admin}
+      - ./docker/nginx/nginx.conf:/etc/nginx/nginx.conf
+      - ./staticfiles:/static
+      - ./media:/media
     depends_on:
-      - mongodb
+      - app
     networks:
       - app_network
-    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "nginx", "-t"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
 
-  # LocalStack for AWS services emulation
-  localstack:
-    image: localstack/localstack:latest
-    container_name: app_localstack
-    ports:
-      - "${LOCALSTACK_EDGE_PORT:-4566}:4566"
-    environment:
-      - SERVICES=s3,sqs,sns,dynamodb,lambda,apigateway
-      - DEBUG=1
-      - DATA_DIR=/tmp/localstack/data
-      - DOCKER_HOST=unix:///var/run/docker.sock
-    volumes:
-      - localstack_data:/tmp/localstack
-      - /var/run/docker.sock:/var/run/docker.sock
-    networks:
-      - app_network
-    restart: unless-stopped
-
-  # Portainer for Docker management
+  # Portainer for Container Management
   portainer:
     image: portainer/portainer-ce:latest
-    container_name: app_portainer
+    container_name: portainer
+    restart: unless-stopped
     ports:
-      - "${PORTAINER_PORT:-9000}:9000"
-      - "${PORTAINER_SSL_PORT:-9443}:9443"
+      - "9000:9000"
+      - "9443:9443"
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
       - portainer_data:/data
     networks:
       - app_network
+    command: -H unix:///var/run/docker.sock --admin-password-file /tmp/portainer_password
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:9000/api/status"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+  # Jaeger for Distributed Tracing
+  jaeger:
+    image: jaegertracing/all-in-one:latest
+    container_name: jaeger
     restart: unless-stopped
-
-networks:
-  app_network:
-    driver: bridge
-    name: app_network
-
-volumes:
-  postgres_data:
-    driver: local
-  redis_data:
-    driver: local
-  backend_node_modules:
-    driver: local
-  backend_python_packages:
-    driver: local
-  frontend_node_modules:
-    driver: local
-  elasticsearch_data:
-    driver: local
-  rabbitmq_data:
-    driver: local
-  prometheus_data:
-    driver: local
-  grafana_data:
-    driver: local
-  minio_data:
-    driver: local
-  pgadmin_data:
-    driver: local
-  mongodb_data:
-    driver: local
-  localstack_data:
-    driver: local
-  portainer_data:
-    driver: local
+    ports:
+      - "16686:16686"
+      - "14268:14268"
+      - "14250:14250"
+    environment:
+      - COLLECTOR_OTLP_ENABLED=true
+    networks:
+     
