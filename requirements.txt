@@ -1,114 +1,45 @@
-# ------------------------------------------------------------------------------
-# CORE FRAMEWORK & SERVER
-# High-performance ASGI framework and server components
-# ------------------------------------------------------------------------------
-fastapi==0.109.2
-    # The web framework. Pinned for stability with Pydantic v2.
-uvicorn[standard]==0.27.1
-    # ASGI server. 'standard' includes uvloop and httptools for performance.
-gunicorn==21.2.0
-    # Process manager for production deployments.
-starlette==0.36.3
-    # Underlying ASGI toolkit. Pinned to match FastAPI requirements.
+# Core Framework & Server
+fastapi>=0.109.0
+uvicorn[standard]>=0.27.0
+starlette>=0.36.0
 
-# ------------------------------------------------------------------------------
-# DATA VALIDATION & SETTINGS
-# ------------------------------------------------------------------------------
-pydantic==2.6.1
-    # Data validation using Python type hints. V2 core.
-pydantic-core==2.16.2
-    # Core validation logic for Pydantic V2.
-pydantic-settings==2.2.1
-    # Management of environment variables and settings.
-email-validator==2.1.0.post1
-    # For Pydantic EmailStr validation.
+# Data Validation & Settings
+pydantic>=2.6.0
+pydantic-settings>=2.1.0
+python-dotenv>=1.0.1
+email-validator>=2.1.0.post1
 
-# ------------------------------------------------------------------------------
-# DATABASE (ORM & DRIVERS)
-# Async SQLAlchemy 2.0 stack with PostgreSQL
-# ------------------------------------------------------------------------------
-sqlalchemy==2.0.27
-    # ORM and SQL toolkit.
-alembic==1.13.1
-    # Database migration tool.
-asyncpg==0.29.0
-    # High-performance async PostgreSQL driver.
-greenlet==3.0.3
-    # Required for SQLAlchemy async IO support.
+# Database (ORM & Drivers)
+sqlalchemy>=2.0.25
+alembic>=1.13.1
+asyncpg>=0.29.0
+psycopg2-binary>=2.9.9
 
-# ------------------------------------------------------------------------------
-# CACHING & MESSAGE BROKER
-# ------------------------------------------------------------------------------
-redis==5.0.1
-    # Python client for Redis key-value store.
+# Caching & Task Queue
+redis>=5.0.1
+celery>=5.3.6
 
-# ------------------------------------------------------------------------------
-# SECURITY & AUTHENTICATION
-# ------------------------------------------------------------------------------
-passlib[bcrypt]==1.7.4
-    # Password hashing library.
-python-jose[cryptography]==3.3.0
-    # JWT (JSON Web Token) encoding and decoding.
-bcrypt==4.1.2
-    # Underlying hashing algorithm.
-cryptography==42.0.2
-    # Cryptographic recipes and primitives.
+# HTTP Clients
+httpx>=0.26.0
+requests>=2.31.0
 
-# ------------------------------------------------------------------------------
-# HTTP CLIENT & NETWORKING
-# ------------------------------------------------------------------------------
-httpx==0.26.0
-    # Async HTTP client for making external API requests.
-httpcore==1.0.2
-    # Low-level HTTP transport layer for httpx.
-python-multipart==0.0.9
-    # Streaming multipart parser for file uploads.
+# Authentication & Security
+python-jose[cryptography]>=3.3.0
+passlib[bcrypt]>=1.7.4
+bcrypt>=4.1.2
+python-multipart>=0.0.9
 
-# ------------------------------------------------------------------------------
-# UTILITIES & LOGGING
-# ------------------------------------------------------------------------------
-python-dotenv==1.0.1
-    # Reads key-value pairs from a .env file.
-loguru==0.7.2
-    # Simplified and powerful logging.
-tenacity==8.2.3
-    # Retrying library for robust external connections.
-orjson==3.9.14
-    # Fast JSON serialization (optional, often used with FastAPI custom responses).
+# Observability & Error Tracking
+# ADDED: sentry-sdk to resolve ModuleNotFoundError
+sentry-sdk[fastapi]>=1.40.4
+prometheus-client>=0.19.0
 
-# ------------------------------------------------------------------------------
-# TESTING (DEV DEPENDENCIES)
-# ------------------------------------------------------------------------------
-pytest==8.0.1
-    # Testing framework.
-pytest-asyncio==0.23.5
-    # Asyncio support for Pytest.
-pytest-cov==4.1.0
-    # Coverage reporting.
+# Utilities
+tenacity>=8.2.3
+ujson>=5.9.0
+pytz>=2024.1
+uuid>=1.30
 
-# ------------------------------------------------------------------------------
-# LINTING & FORMATTING (DEV DEPENDENCIES)
-# ------------------------------------------------------------------------------
-black==24.1.1
-    # The uncompromising code formatter.
-isort==5.13.2
-    # Import sorter.
-flake8==7.0.0
-    # Linter.
-mypy==1.8.0
-    # Static type checker.
-
-# ------------------------------------------------------------------------------
-# DEPENDENCY RESOLUTION HELPERS
-# Explicit pins to prevent sub-dependency conflicts
-# ------------------------------------------------------------------------------
-typing-extensions==4.9.0
-    # Backported type hints.
-anyio==4.2.0
-    # High level compatibility layer for multiple asynchronous event loop implementations.
-sniffio==1.3.0
-    # Detect which async library is running.
-idna==3.6
-    # Internationalized Domain Names in Applications.
-certifi==2024.2.2
-    # Python package for providing Mozilla's CA Bundle.
+# Testing (Production dependencies often include these for CI/CD pipelines)
+pytest>=8.0.0
+pytest-asyncio>=0.23.5
