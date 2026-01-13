@@ -33,7 +33,7 @@ export interface Book {
   processing_error?: string
 }
 
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000/api/v1'
+const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'https://ai-scanner-j2c9.onrender.com/api/v1'
 
 export function useFileUpload() {
   const [uploadFiles, setUploadFiles] = useState([])
@@ -208,7 +208,7 @@ export function useFileUpload() {
     } catch (error: any) {
       console.error('Upload error:', error)
       const errorMessage = error.response?.data?.detail || 'Upload failed'
-      
+
       setUploadFiles(prev =>
         prev.map(f =>
           f.id === uploadFileEntry.id
@@ -221,7 +221,7 @@ export function useFileUpload() {
             : f
         )
       )
-      
+
       toast({
         title: 'Upload Failed',
         description: errorMessage,

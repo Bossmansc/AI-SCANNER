@@ -110,11 +110,6 @@ class TextChunker:
         # Apply overlap and format
         processed_chunks = []
         
-        # Simple overlap application: 
-        # Since we split recursively, true sliding window is hard. 
-        # We will just use the raw chunks for now as they are semantically split.
-        # A more advanced implementation would re-merge and slide.
-        
         for i, chunk_text in enumerate(raw_chunks):
             chunk_text = chunk_text.strip()
             if not chunk_text:

@@ -28,7 +28,7 @@ interface ChatResponse {
   error?: string
 }
 
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000/api/v1'
+const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'https://ai-scanner-j2c9.onrender.com/api/v1'
 
 export function useChatStream() {
   const [messages, setMessages] = useState([])
@@ -130,7 +130,7 @@ export function useChatStream() {
 
             if (data.chunk) {
               accumulatedContent += data.chunk
-              
+
               // Update the assistant message with accumulated content
               setMessages(prev => prev.map(msg =>
                 msg.id === assistantMessageId
@@ -146,20 +146,13 @@ export function useChatStream() {
                 content: accumulatedContent,
                 metadata: {
                   ...assistantMessage.metadata,
-                  model_used: 'gpt-3.5-turbo-16k', // Placeholder, ideally from backend
+                  model_used: 'deepseek-chat',
                 },
               }
 
               setMessages(prev => prev.map(msg =>
                 msg.id === assistantMessageId ? finalMessage : msg
               ))
-
-              // If this is a new conversation, set the ID
-              if (!newConversationId) {
-                // In a real app, the backend should return the new conversation ID
-                // For now we simulate it or rely on client-side state if needed
-                // newConversationId = data.conversation_id 
-              }
 
               setIsLoading(false)
               setIsStreaming(false)
@@ -177,7 +170,7 @@ export function useChatStream() {
       // Only show error if not an abort error
       if (error.name !== 'AbortError') {
         console.error('Chat stream error:', error)
-        
+
         // Update assistant message with error state
         setMessages(prev => prev.map(msg =>
           msg.id === assistantMessageId
@@ -224,7 +217,7 @@ export function useChatStream() {
       const response = await axios.get(
         `${API_BASE_URL}/chat/conversations/${id}`
       )
-      
+
       const loadedMessages: Message[] = response.data.map((msg: any) => ({
         id: msg.message_id,
         role: msg.role as 'user' | 'assistant' | 'system',
@@ -238,7 +231,7 @@ export function useChatStream() {
 
       setMessages(loadedMessages)
       setConversationId(id)
-      
+
       return { success: true, messages: loadedMessages }
     } catch (error: any) {
       console.error('Error loading conversation:', error)
@@ -263,16 +256,16 @@ export function useChatStream() {
   const deleteConversation = useCallback(async (id: string) => {
     try {
       await axios.delete(`${API_BASE_URL}/chat/conversations/${id}`)
-      
+
       if (id === conversationId) {
         clearConversation()
       }
-      
+
       toast({
         title: 'Conversation Deleted',
         description: 'Conversation has been removed',
       })
-      
+
       return { success: true }
     } catch (error: any) {
       console.error('Error deleting conversation:', error)

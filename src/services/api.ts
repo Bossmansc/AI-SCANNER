@@ -1,6 +1,6 @@
 import axios from 'axios'
 
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000/api/v1'
+const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'https://ai-scanner-j2c9.onrender.com/api/v1'
 
 const api = axios.create({
   baseURL: API_BASE_URL,
@@ -40,10 +40,10 @@ api.interceptors.response.use(
 export const booksApi = {
   // Get all books
   getAll: () => api.get('/books'),
-  
+
   // Get book by ID
   getById: (bookId: string) => api.get(`/books/${bookId}`),
-  
+
   // Upload book
   upload: (formData: FormData) => 
     api.post('/books/upload', formData, {
@@ -51,13 +51,13 @@ export const booksApi = {
         'Content-Type': 'multipart/form-data',
       },
     }),
-  
+
   // Delete book
   delete: (bookId: string) => api.delete(`/books/${bookId}`),
-  
+
   // Get processing status
   getStatus: (bookId: string) => api.get(`/books/${bookId}/status`),
-  
+
   // Search in book
   search: (bookId: string, query: string, k: number = 5, scoreThreshold: number = 0.5) =>
     api.post(`/books/search/${bookId}`, { query, k, score_threshold: scoreThreshold }),
@@ -72,7 +72,7 @@ export const chatApi = {
     book_ids?: string[]
     context_depth?: string
   }) => api.post('/chat/stream', data),
-  
+
   // Regular chat (non-streaming)
   chat: (data: {
     message: string
@@ -80,22 +80,22 @@ export const chatApi = {
     book_ids?: string[]
     context_depth?: string
   }) => api.post('/chat', data),
-  
+
   // Get conversations
   getConversations: (skip: number = 0, limit: number = 50) =>
     api.get('/chat/conversations', { params: { skip, limit } }),
-  
+
   // Get conversation messages
   getConversationMessages: (conversationId: string, limit: number = 100) =>
     api.get(`/chat/conversations/${conversationId}`, { params: { limit } }),
-  
+
   // Delete conversation
   deleteConversation: (conversationId: string) =>
     api.delete(`/chat/conversations/${conversationId}`),
-  
+
   // Get available books for chat
   getAvailableBooks: () => api.get('/chat/books/available'),
-  
+
   // Health check
   health: () => api.get('/chat/health'),
 }
@@ -104,10 +104,10 @@ export const chatApi = {
 export const authApi = {
   login: (username: string, password: string) =>
     api.post('/auth/token', { username, password }),
-  
+
   register: (email: string, username: string, password: string) =>
     api.post('/auth/register', { email, username, password }),
-  
+
   getProfile: () => api.get('/auth/me'),
 }
 
