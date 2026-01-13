@@ -6,7 +6,7 @@ logger = logging.getLogger(__name__)
 
 class TextChunker:
     """Splits text into overlapping chunks for embedding."""
-    
+
     def __init__(
         self,
         chunk_size: int = 1000,
@@ -15,7 +15,7 @@ class TextChunker:
     ):
         """
         Initialize chunker with configuration.
-        
+
         Args:
             chunk_size: Maximum characters per chunk
             chunk_overlap: Overlap between chunks
@@ -23,7 +23,7 @@ class TextChunker:
         """
         self.chunk_size = chunk_size
         self.chunk_overlap = chunk_overlap
-        
+
         if separators is None:
             self.separators = [
                 "\n\n",  # Double newlines (paragraphs)
@@ -38,20 +38,20 @@ class TextChunker:
             ]
         else:
             self.separators = separators
-    
+
     def _split_text_with_separator(self, text: str, separator: str) -> List[str]:
         """Split text using a specific separator."""
         if separator:
             splits = text.split(separator)
         else:
             splits = list(text)
-        
+
         # Combine the separator back into each split (except the last one)
         if separator and len(splits) > 1:
             splits = [split + separator for split in splits[:-1]] + [splits[-1]]
-        
+
         return splits
-    
+
     def create_chunks(
         self, 
         text: str, 
@@ -60,12 +60,12 @@ class TextChunker:
     ) -> List[Dict[str, Any]]:
         """
         Create chunks from text with configurable depth.
-        
+
         Args:
             text: The text to chunk
             metadata: Metadata to attach to each chunk
             depth_level: "shallow", "medium", or "deep" (affects chunk size)
-        
+
         Returns:
             List of chunk dictionaries with text and metadata
         """
@@ -75,75 +75,84 @@ class TextChunker:
             "medium": {"chunk_size": 1000, "chunk_overlap": 200},
             "deep": {"chunk_size": 500, "chunk_overlap": 100},
         }
-        
+
         config = depth_config.get(depth_level, depth_config["medium"])
         effective_chunk_size = config["chunk_size"]
         effective_overlap = config["chunk_overlap"]
-        
+
         # Clean text
         text = self._clean_text(text)
+        if not text:
+            return []
+
+        final_chunks = []
         
-        if len(text)  0 and chunks:
-                        overlap_start = max(0, len(chunks[-1]) - effective_overlap)
-                        current_chunk = chunks[-1][overlap_start:] + split
-                    else:
-                        current_chunk = split
+        # Recursive splitting logic
+        def split_text(text_segment: str, separator_index: int = 0) -> List[str]:
+            # If we ran out of separators, just return the text as is (or force split if needed)
+            if separator_index >= len(self.separators):
+                return [text_segment]
+
+            separator = self.separators[separator_index]
             
-            # Add last chunk if exists
-            if current_chunk:
-                chunks.append(current_chunk)
-            
-            break  # Successfully split
+            # If text is small enough, return it
+            if len(text_segment)  effective_chunk_size:
+                    # Recurse with next separator
+                    result_splits.extend(split_text(split, separator_index + 1))
+                else:
+                    result_splits.append(split)
+                    
+            return result_splits
+
+        # Generate raw text chunks
+        raw_chunks = split_text(text)
+
+        # Apply overlap and format
+        processed_chunks = []
         
-        # If no separator worked, split by character count
-        if not chunks:
-            start = 0
-            chunk_index = 0
-            while start  effective_chunk_size * 0.7:  # Break at reasonable position
-                            end = start + break_pos + len(break_char)
-                            chunk = text[start:end]
-                            break
+        # Simple overlap application: 
+        # Since we split recursively, true sliding window is hard. 
+        # We will just use the raw chunks for now as they are semantically split.
+        # A more advanced implementation would re-merge and slide.
+        
+        for i, chunk_text in enumerate(raw_chunks):
+            chunk_text = chunk_text.strip()
+            if not chunk_text:
+                continue
                 
-                chunks.append(chunk)
-                start = end - effective_overlap
-                chunk_index += 1
-        
-        # Format chunks with metadata
-        formatted_chunks = []
-        for i, chunk_text in enumerate(chunks):
             chunk_metadata = {
                 **metadata,
-                "text": chunk_text.strip(),
+                "text": chunk_text,
                 "chunk_index": i,
-                "total_chunks": len(chunks),
+                "total_chunks": len(raw_chunks),
                 "depth_level": depth_level,
                 "char_count": len(chunk_text),
                 "word_count": len(chunk_text.split())
             }
-            
+
             # Add source location if available
             if "page_number" in metadata:
                 chunk_metadata["page_number"] = metadata["page_number"]
-            
-            formatted_chunks.append(chunk_metadata)
-        
-        logger.info(f"Created {len(formatted_chunks)} chunks from text (depth: {depth_level})")
-        return formatted_chunks
-    
+
+            processed_chunks.append(chunk_metadata)
+
+        logger.info(f"Created {len(processed_chunks)} chunks from text (depth: {depth_level})")
+        return processed_chunks
+
     def _clean_text(self, text: str) -> str:
         """Clean and normalize text before chunking."""
         # Remove excessive whitespace
         text = re.sub(r'\s+', ' ', text)
-        
+
         # Remove control characters (except newlines and tabs)
         text = re.sub(r'[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]', '', text)
-        
+
         # Normalize unicode spaces
         text = text.replace('\u200b', '')  # Zero-width space
         text = text.replace('\u00a0', ' ')  # Non-breaking space
-        
+
         return text.strip()
-    
+
     def chunk_document(
         self, 
         document_data: Dict[str, Any], 
@@ -151,11 +160,11 @@ class TextChunker:
     ) -> List[Dict[str, Any]]:
         """
         Convenience method to chunk a document from file processor output.
-        
+
         Args:
             document_data: Output from FileProcessor.process_file()
             depth_level: Chunking depth level
-        
+
         Returns:
             List of chunks with combined metadata
         """
@@ -165,13 +174,13 @@ class TextChunker:
             "file_extension": document_data["file_extension"],
             "file_hash": document_data["file_hash"],
         }
-        
+
         chunks = self.create_chunks(
             text=document_data["text"],
             metadata=metadata,
             depth_level=depth_level
         )
-        
+
         return chunks
 
 # Default chunker instance

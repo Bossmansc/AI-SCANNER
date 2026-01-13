@@ -46,7 +46,6 @@ class VectorStore:
             self.index = faiss.IndexFlatIP(self.dimension)
 
             # Add ID mapping
-            # Note: IndexIDMap2 is preferred for reconstruction, but IndexIDMap is safer on some versions
             try:
                 self.index = faiss.IndexIDMap2(self.index)
             except AttributeError:
@@ -66,13 +65,6 @@ class VectorStore:
     ) -> List[str]:
         """
         Add text chunks to the vector store.
-
-        Args:
-            chunks: List of chunk dictionaries with 'text' and metadata
-            batch_size: Number of chunks to process at once
-
-        Returns:
-            List of chunk IDs
         """
         if not chunks:
             return []
@@ -126,14 +118,6 @@ class VectorStore:
     ) -> List[Dict[str, Any]]:
         """
         Search for similar chunks to the query.
-
-        Args:
-            query: Search query string
-            k: Number of results to return
-            score_threshold: Minimum similarity score (0-1)
-
-        Returns:
-            List of matching chunks with similarity scores
         """
         if self.index is None or self.total_chunks == 0:
             return []
@@ -153,15 +137,6 @@ class VectorStore:
                 if idx == -1 or score  List[Dict[str, Any]]:
         """
         Search with metadata filters.
-
-        Args:
-            query: Search query string
-            k: Number of results
-            filters: Dictionary of metadata filters
-            score_threshold: Minimum similarity score
-
-        Returns:
-            Filtered search results
         """
         # First get regular search results
         results = self.similarity_search(query, k * 2, score_threshold)
@@ -184,15 +159,7 @@ class VectorStore:
         return filtered_results[:k]
 
     def delete_chunks(self, chunk_ids: List[str]) -> int:
-        """
-        Delete specific chunks from the index.
-
-        Args:
-            chunk_ids: List of chunk IDs to delete
-
-        Returns:
-            Number of chunks deleted
-        """
+        """Delete specific chunks from the index."""
         if not self.index or not chunk_ids:
             return 0
 
@@ -256,12 +223,7 @@ class VectorStore:
             raise RuntimeError(f"Could not save vector store: {str(e)}")
 
     def load(self) -> bool:
-        """
-        Load the vector store from disk.
-
-        Returns:
-            True if loaded successfully, False otherwise
-        """
+        """Load the vector store from disk."""
         try:
             if not self.index_file.exists():
                 return False
@@ -329,15 +291,7 @@ class VectorStoreManager:
                         logger.error(f"Failed to load store from {collection_dir}: {e}")
 
     def get_store(self, collection_name: str) -> VectorStore:
-        """
-        Get or create a vector store for a collection.
-
-        Args:
-            collection_name: Name of the collection
-
-        Returns:
-            VectorStore instance
-        """
+        """Get or create a vector store for a collection."""
         if collection_name not in self.stores:
             store = VectorStore(collection_name)
             store.create_index()
@@ -352,17 +306,7 @@ class VectorStoreManager:
         chunks: List[Dict[str, Any]],
         batch_size: int = 100
     ) -> List[str]:
-        """
-        Add document chunks to a collection.
-
-        Args:
-            collection_name: Name of the collection
-            chunks: List of chunk dictionaries
-            batch_size: Batch size for embedding
-
-        Returns:
-            List of chunk IDs
-        """
+        """Add document chunks to a collection."""
         store = self.get_store(collection_name)
         chunk_ids = store.add_texts(chunks, batch_size)
         store.save()
@@ -376,19 +320,7 @@ class VectorStoreManager:
         filters: Optional[Dict[str, Any]] = None,
         score_threshold: float = 0.5
     ) -> List[Dict[str, Any]]:
-        """
-        Search within a specific collection.
-
-        Args:
-            collection_name: Collection to search in
-            query: Search query
-            k: Number of results
-            filters: Metadata filters
-            score_threshold: Minimum similarity score
-
-        Returns:
-            List of matching chunks
-        """
+        """Search within a specific collection."""
         if collection_name not in self.stores:
             return []
 
@@ -402,18 +334,7 @@ class VectorStoreManager:
         k_per_collection: int = 3,
         score_threshold: float = 0.5
     ) -> List[Dict[str, Any]]:
-        """
-        Search across multiple collections.
-
-        Args:
-            query: Search query
-            collection_names: List of collections to search (None for all)
-            k_per_collection: Results per collection
-            score_threshold: Minimum similarity score
-
-        Returns:
-            Combined results from all collections
-        """
+        """Search across multiple collections."""
         if collection_names is None:
             collection_names = list(self.stores.keys())
 
@@ -440,15 +361,7 @@ class VectorStoreManager:
         return unique_results
 
     def delete_collection(self, collection_name: str) -> bool:
-        """
-        Delete a collection and its vector store.
-
-        Args:
-            collection_name: Name of collection to delete
-
-        Returns:
-            True if deleted successfully
-        """
+        """Delete a collection and its vector store."""
         if collection_name not in self.stores:
             return False
 
@@ -470,15 +383,7 @@ class VectorStoreManager:
             return False
 
     def get_collection_stats(self, collection_name: str = None) -> Dict[str, Any]:
-        """
-        Get statistics for a specific collection or all collections.
-
-        Args:
-            collection_name: Specific collection or None for all
-
-        Returns:
-            Dictionary of statistics
-        """
+        """Get statistics for a specific collection or all collections."""
         if collection_name:
             if collection_name in self.stores:
                 return self.stores[collection_name].get_stats()
