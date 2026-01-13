@@ -1,52 +1,31 @@
-import React from 'react'
-import ReactDOM from 'react-dom/client'
-import App from './App'
-import './index.css'
+import React from 'react';
+import ReactDOM from 'react-dom/client';
+import App from './App';
+import './index.css';
 
-// Initialize error boundary for better error handling
-class ErrorBoundary extends React.Component {
-  constructor(props: { children: React.ReactNode }) {
-    super(props)
-    this.state = { hasError: false }
-  }
+/**
+ * Application Entry Point
+ * 
+ * This module initializes the React application by mounting the root component
+ * to the DOM. It utilizes React 18's createRoot API for concurrent rendering features.
+ */
 
-  static getDerivedStateFromError() {
-    return { hasError: true }
-  }
+// Locate the root DOM node
+const rootElement = document.getElementById('root');
 
-  componentDidCatch(error: Error, errorInfo: React.ErrorInfo) {
-    console.error('React Error Boundary caught:', error, errorInfo)
-  }
-
-  render() {
-    if (this.state.hasError) {
-      return (
-        
-          
-            
-              Something went wrong
-            
-            
-              The application encountered an error. Please refresh the page.
-            
-             window.location.reload()}
-              className="px-4 py-2 bg-primary  rounded-md hover:bg-primary/90"
-            >
-              Refresh Page
-            
-          
-        
-      )
-    }
-
-    return this.props.children
-  }
+// Safety check to ensure the root element exists before attempting to mount
+if (!rootElement) {
+  const errorMessage = 'FATAL: Failed to find the root element. Ensure there is a <div id="root"></div> in your index.html.';
+  console.error(errorMessage);
+  throw new Error(errorMessage);
 }
 
-ReactDOM.createRoot(document.getElementById('root')!).render(
-  
-    
-      
-    
-  
-)
+// Initialize the React root
+const root = ReactDOM.createRoot(rootElement);
+
+// Render the application wrapped in StrictMode for development checks
+root.render(
+  <React.StrictMode>
+    <App />
+  </React.StrictMode>
+);

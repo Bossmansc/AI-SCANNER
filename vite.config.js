@@ -1,81 +1,80 @@
-import { defineConfig } from 'vite';
-import react from '@vitejs/plugin-react';
-import path from 'path';
+import { defineConfig } from 'vite'
+import react from '@vitejs/plugin-react'
+import path from 'path'
 
-/**
- * Vite Configuration
- * 
- * This configuration is optimized for:
- * 1. Containerized environments (Docker, Cloud IDEs) via host: '0.0.0.0'
- * 2. React development with Fast Refresh
- * 3. Path aliases (@ -> src)
- * 4. Production build optimizations
- */
+// https://vitejs.dev/config/
 export default defineConfig({
-  plugins: [
-    react()
-  ],
-  
+  plugins: [react()],
   resolve: {
     alias: {
-      // Allows imports like "import Component from '@/components/Component'"
-      "@": path.resolve(__dirname, "./src"),
+      // Core aliases for absolute imports
+      '@': path.resolve(__dirname, './src'),
+      '@components': path.resolve(__dirname, './src/components'),
+      '@pages': path.resolve(__dirname, './src/pages'),
+      '@hooks': path.resolve(__dirname, './src/hooks'),
+      '@utils': path.resolve(__dirname, './src/utils'),
+      '@lib': path.resolve(__dirname, './src/lib'),
+      '@styles': path.resolve(__dirname, './src/styles'),
+      '@assets': path.resolve(__dirname, './src/assets'),
+      '@types': path.resolve(__dirname, './src/types'),
+      '@contexts': path.resolve(__dirname, './src/contexts'),
+      '@services': path.resolve(__dirname, './src/services'),
+      '@api': path.resolve(__dirname, './src/api'),
+      '@config': path.resolve(__dirname, './src/config'),
     },
   },
-
   server: {
-    // Bind to all network interfaces to allow access from outside the container/VM
-    host: '0.0.0.0', 
-    port: 5173,
-    // If port 5173 is in use, fail rather than trying the next available port
-    // This ensures deterministic port binding for proxy configurations
-    strictPort: true,
+    port: 3000,
+    host: true, // Listen on all addresses
+    open: true, // Automatically open browser
     cors: true,
-    // Watcher options to ensure file changes are detected in virtualized filesystems
+    // Proxy configuration for API requests (adjust as needed)
+    proxy: {
+      '/api': {
+        target: 'http://localhost:5000',
+        changeOrigin: true,
+        secure: false,
+        rewrite: (path) => path.replace(/^\/api/, ''),
+      },
+    },
+    // Watch configuration for HMR
     watch: {
       usePolling: true,
-      interval: 100,
     },
-    // HMR (Hot Module Replacement) configuration
-    hmr: {
-      // Ensure the client connects to the correct port, useful behind reverse proxies
-      clientPort: 5173, 
-    }
   },
-
-  preview: {
-    // Preview server configuration (npm run preview)
-    host: '0.0.0.0',
-    port: 4173,
-    strictPort: true,
-  },
-
   build: {
-    // Output directory for production build
     outDir: 'dist',
-    // Generate sourcemaps for better debugging in production
-    sourcemap: true,
-    // Minification options
-    minify: 'esbuild',
-    // Rollup options for chunk splitting
+    sourcemap: true, // Generate source maps for production debugging
     rollupOptions: {
       output: {
-        manualChunks: (id) => {
-          // Split vendor modules into separate chunks for better caching
-          if (id.includes('node_modules')) {
-            if (id.includes('react') || id.includes('react-dom')) {
-              return 'vendor-react';
-            }
-            // Group other large libraries if necessary
-            return 'vendor'; 
-          }
+        manualChunks: {
+          // Vendor splitting for better caching
+          'react-vendor': ['react', 'react-dom', 'react-router-dom'],
+          'ui-vendor': ['@radix-ui/react-dialog', '@radix-ui/react-dropdown-menu'],
         },
       },
     },
+    // Chunk size warnings threshold (in kB)
+    chunkSizeWarningLimit: 1000,
   },
-
-  // Optimize dependencies that might be slow to compile
+  // Environment variable prefix
+  envPrefix: 'VITE_',
+  // CSS configuration
+  css: {
+    modules: {
+      localsConvention: 'camelCase',
+    },
+    preprocessorOptions: {
+      scss: {
+        additionalData: `@import "@styles/variables.scss";`,
+      },
+    },
+  },
+  // Optimize dependencies
   optimizeDeps: {
-    include: ['react', 'react-dom'],
+    include: ['react', 'react-dom', 'react-router-dom'],
+    exclude: ['@ffmpeg/ffmpeg', '@ffmpeg/util'], // Example of excluding heavy libs
   },
-});
+  // Base public path (for deployment subpaths)
+  base: './',
+})

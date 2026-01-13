@@ -1,225 +1,216 @@
-import React, { Suspense, lazy, useEffect } from 'react';
-import { BrowserRouter as Router, Routes, Route, Navigate, useLocation } from 'react-router-dom';
+import React from 'react';
+import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { ReactQueryDevtools } from '@tanstack/react-query-devtools';
 import { Toaster } from 'react-hot-toast';
 
-// Context Providers
-import { ThemeProvider } from './contexts/ThemeContext';
-import { AuthProvider, useAuth } from './contexts/AuthContext';
-import { WebSocketProvider } from './contexts/WebSocketContext';
-
-// Layouts
+// Layout Components
 import MainLayout from './layouts/MainLayout';
 import AuthLayout from './layouts/AuthLayout';
 
+// Page Components - Lazy Loading for Code Splitting
+const HomePage = React.lazy(() => import('./pages/HomePage'));
+const DashboardPage = React.lazy(() => import('./pages/DashboardPage'));
+const ProfilePage = React.lazy(() => import('./pages/ProfilePage'));
+const SettingsPage = React.lazy(() => import('./pages/SettingsPage'));
+const AnalyticsPage = React.lazy(() => import('./pages/AnalyticsPage'));
+const LoginPage = React.lazy(() => import('./pages/auth/LoginPage'));
+const RegisterPage = React.lazy(() => import('./pages/auth/RegisterPage'));
+const ForgotPasswordPage = React.lazy(() => import('./pages/auth/ForgotPasswordPage'));
+const ResetPasswordPage = React.lazy(() => import('./pages/auth/ResetPasswordPage'));
+const NotFoundPage = React.lazy(() => import('./pages/errors/NotFoundPage'));
+const ServerErrorPage = React.lazy(() => import('./pages/errors/ServerErrorPage'));
+const UnauthorizedPage = React.lazy(() => import('./pages/errors/UnauthorizedPage'));
+
+// Feature Modules
+const ProjectsModule = React.lazy(() => import('./modules/projects/ProjectsModule'));
+const TasksModule = React.lazy(() => import('./modules/tasks/TasksModule'));
+const TeamModule = React.lazy(() => import('./modules/team/TeamModule'));
+const DocumentsModule = React.lazy(() => import('./modules/documents/DocumentsModule'));
+const CalendarModule = React.lazy(() => import('./modules/calendar/CalendarModule'));
+
+// Context Providers
+import { AuthProvider } from './contexts/AuthContext';
+import { ThemeProvider } from './contexts/ThemeContext';
+import { NotificationProvider } from './contexts/NotificationContext';
+
+// Hooks
+import { useAuth } from './hooks/useAuth';
+
 // Components
-import LoadingScreen from './components/ui/LoadingScreen';
-import ErrorBoundary from './components/common/ErrorBoundary';
+import LoadingSpinner from './components/ui/LoadingSpinner';
+import ErrorBoundary from './components/errors/ErrorBoundary';
 
-// Lazy Loaded Pages - Performance Optimization
-const Dashboard = lazy(() => import('./pages/dashboard/Dashboard'));
-const Analytics = lazy(() => import('./pages/analytics/Analytics'));
-const UserManagement = lazy(() => import('./pages/users/UserManagement'));
-const SystemHealth = lazy(() => import('./pages/system/SystemHealth'));
-const Settings = lazy(() => import('./pages/settings/Settings'));
-const UserProfile = lazy(() => import('./pages/profile/UserProfile'));
-
-// Auth Pages
-const Login = lazy(() => import('./pages/auth/Login'));
-const Register = lazy(() => import('./pages/auth/Register'));
-const ForgotPassword = lazy(() => import('./pages/auth/ForgotPassword'));
-const ResetPassword = lazy(() => import('./pages/auth/ResetPassword'));
-
-// Error Pages
-const NotFound = lazy(() => import('./pages/errors/NotFound'));
-const Unauthorized = lazy(() => import('./pages/errors/Unauthorized'));
-const ServerError = lazy(() => import('./pages/errors/ServerError'));
-
-// Initialize React Query Client with default stale times for high-concurrency caching
+// Create Query Client with configuration
 const queryClient = new QueryClient({
   defaultOptions: {
     queries: {
-      staleTime: 1000 * 60 * 5, // 5 minutes
-      cacheTime: 1000 * 60 * 30, // 30 minutes
-      refetchOnWindowFocus: false,
+      staleTime: 5 * 60 * 1000, // 5 minutes
+      cacheTime: 10 * 60 * 1000, // 10 minutes
       retry: 1,
+      refetchOnWindowFocus: false,
     },
   },
 });
 
-/**
- * ScrollToTop
- * Utility component to ensure view resets on route change
- */
-const ScrollToTop = () => {
-  const { pathname } = useLocation();
-
-  useEffect(() => {
-    window.scrollTo(0, 0);
-  }, [pathname]);
-
-  return null;
-};
-
-/**
- * ProtectedRoute
- * Higher-order component to guard routes requiring authentication
- */
-const ProtectedRoute = ({ children, requiredRole = null }) => {
-  const { isAuthenticated, user, isLoading } = useAuth();
-  const location = useLocation();
+// Protected Route Component
+const ProtectedRoute = ({ children, requiredRoles = [] }) => {
+  const { user, isLoading } = useAuth();
 
   if (isLoading) {
-    return <LoadingScreen fullScreen />;
+    return (
+      <div className="flex items-center justify-center min-h-screen">
+        <LoadingSpinner size="lg" />
+      </div>
+    );
   }
 
-  if (!isAuthenticated) {
-    // Redirect to login while saving the attempted location
-    return <Navigate to="/auth/login" state={{ from: location }} replace />;
+  if (!user) {
+    return <Navigate to="/login" replace />;
   }
 
-  if (requiredRole && user?.role !== requiredRole && user?.role !== 'admin') {
-    return <Navigate to="/unauthorized" replace />;
+  if (requiredRoles.length > 0) {
+    const hasRequiredRole = requiredRoles.some(role => 
+      user.roles?.includes(role)
+    );
+    
+    if (!hasRequiredRole) {
+      return <Navigate to="/unauthorized" replace />;
+    }
   }
 
   return children;
 };
 
-/**
- * PublicRoute
- * Guards routes that should only be accessible when NOT authenticated (e.g. Login)
- */
+// Public Route Component (redirects authenticated users away)
 const PublicRoute = ({ children }) => {
-  const { isAuthenticated, isLoading } = useAuth();
-  const location = useLocation();
+  const { user, isLoading } = useAuth();
 
   if (isLoading) {
-    return <LoadingScreen fullScreen />;
+    return (
+      <div className="flex items-center justify-center min-h-screen">
+        <LoadingSpinner size="lg" />
+      </div>
+    );
   }
 
-  if (isAuthenticated) {
-    // Redirect to dashboard or the page they came from
-    const from = location.state?.from?.pathname || '/dashboard';
-    return <Navigate to={from} replace />;
+  if (user) {
+    return <Navigate to="/dashboard" replace />;
   }
 
   return children;
 };
 
-/**
- * App Component
- * Root application structure containing providers, routing logic, and global layout configuration.
- */
-const App = () => {
+// App Component
+function App() {
   return (
     <ErrorBoundary>
       <QueryClientProvider client={queryClient}>
-        <AuthProvider>
-          <ThemeProvider>
-            <WebSocketProvider>
+        <ThemeProvider>
+          <NotificationProvider>
+            <AuthProvider>
               <Router>
-                <ScrollToTop />
-                <Toaster 
-                  position="top-right"
-                  toastOptions={{
-                    duration: 4000,
-                    style: {
-                      background: '#333',
-                      color: '#fff',
-                    },
-                    success: {
-                      duration: 3000,
-                      theme: {
-                        primary: '#4aed88',
-                        secondary: 'black',
-                      },
-                    },
-                  }}
-                />
-                
-                <Suspense fallback={<LoadingScreen fullScreen />}>
-                  <Routes>
-                    {/* Authentication Routes */}
-                    <Route path="/auth" element={<AuthLayout />}>
-                      <Route path="login" element={
-                        <PublicRoute>
-                          <Login />
-                        </PublicRoute>
-                      } />
-                      <Route path="register" element={
-                        <PublicRoute>
-                          <Register />
-                        </PublicRoute>
-                      } />
-                      <Route path="forgot-password" element={
-                        <PublicRoute>
-                          <ForgotPassword />
-                        </PublicRoute>
-                      } />
-                      <Route path="reset-password" element={
-                        <PublicRoute>
-                          <ResetPassword />
-                        </PublicRoute>
-                      } />
-                      <Route index element={<Navigate to="/auth/login" replace />} />
-                    </Route>
-
-                    {/* Protected Application Routes */}
-                    <Route path="/" element={<MainLayout />}>
-                      <Route index element={<Navigate to="/dashboard" replace />} />
+                <div className="App">
+                  <React.Suspense 
+                    fallback={
+                      <div className="flex items-center justify-center min-h-screen">
+                        <LoadingSpinner size="lg" />
+                      </div>
+                    }
+                  >
+                    <Routes>
+                      {/* Public Routes */}
+                      <Route path="/" element={<HomePage />} />
                       
-                      <Route path="dashboard" element={
-                        <ProtectedRoute>
-                          <Dashboard />
-                        </ProtectedRoute>
-                      } />
+                      {/* Auth Routes - Only accessible when NOT logged in */}
+                      <Route element={<PublicRoute><AuthLayout /></PublicRoute>}>
+                        <Route path="/login" element={<LoginPage />} />
+                        <Route path="/register" element={<RegisterPage />} />
+                        <Route path="/forgot-password" element={<ForgotPasswordPage />} />
+                        <Route path="/reset-password/:token" element={<ResetPasswordPage />} />
+                      </Route>
 
-                      <Route path="analytics" element={
-                        <ProtectedRoute requiredRole="analyst">
-                          <Analytics />
-                        </ProtectedRoute>
-                      } />
+                      {/* Protected Routes - Require authentication */}
+                      <Route element={<ProtectedRoute><MainLayout /></ProtectedRoute>}>
+                        {/* Dashboard */}
+                        <Route path="/dashboard" element={<DashboardPage />} />
+                        
+                        {/* Profile & Settings */}
+                        <Route path="/profile" element={<ProfilePage />} />
+                        <Route path="/settings" element={<SettingsPage />} />
+                        <Route path="/settings/:tab" element={<SettingsPage />} />
+                        
+                        {/* Analytics */}
+                        <Route path="/analytics" element={<AnalyticsPage />} />
+                        
+                        {/* Feature Modules */}
+                        <Route path="/projects/*" element={<ProjectsModule />} />
+                        <Route path="/tasks/*" element={<TasksModule />} />
+                        <Route path="/team/*" element={<TeamModule />} />
+                        <Route path="/documents/*" element={<DocumentsModule />} />
+                        <Route path="/calendar/*" element={<CalendarModule />} />
+                        
+                        {/* Admin Routes - Require admin role */}
+                        <Route 
+                          path="/admin/*" 
+                          element={
+                            <ProtectedRoute requiredRoles={['admin', 'superadmin']}>
+                              <React.Suspense fallback={<LoadingSpinner />}>
+                                {React.createElement(React.lazy(() => import('./modules/admin/AdminModule')))}
+                              </React.Suspense>
+                            </ProtectedRoute>
+                          } 
+                        />
+                      </Route>
 
-                      <Route path="users" element={
-                        <ProtectedRoute requiredRole="admin">
-                          <UserManagement />
-                        </ProtectedRoute>
-                      } />
-
-                      <Route path="system" element={
-                        <ProtectedRoute requiredRole="admin">
-                          <SystemHealth />
-                        </ProtectedRoute>
-                      } />
-
-                      <Route path="settings" element={
-                        <ProtectedRoute>
-                          <Settings />
-                        </ProtectedRoute>
-                      } />
-
-                      <Route path="profile" element={
-                        <ProtectedRoute>
-                          <UserProfile />
-                        </ProtectedRoute>
-                      } />
-                    </Route>
-
-                    {/* Error Routes */}
-                    <Route path="/unauthorized" element={<Unauthorized />} />
-                    <Route path="/500" element={<ServerError />} />
-                    <Route path="*" element={<NotFound />} />
-                  </Routes>
-                </Suspense>
+                      {/* Error Pages */}
+                      <Route path="/404" element={<NotFoundPage />} />
+                      <Route path="/500" element={<ServerErrorPage />} />
+                      <Route path="/unauthorized" element={<UnauthorizedPage />} />
+                      
+                      {/* Catch-all route for 404 */}
+                      <Route path="*" element={<Navigate to="/404" replace />} />
+                    </Routes>
+                  </React.Suspense>
+                  
+                  {/* Global Toaster for notifications */}
+                  <Toaster
+                    position="top-right"
+                    toastOptions={{
+                      duration: 5000,
+                      style: {
+                        background: 'var(--bg-secondary)',
+                        color: 'var(--text-primary)',
+                        border: '1px solid var(--border-color)',
+                      },
+                      success: {
+                        iconTheme: {
+                          primary: 'var(--success)',
+                          secondary: 'var(--bg-secondary)',
+                        },
+                      },
+                      error: {
+                        iconTheme: {
+                          primary: 'var(--error)',
+                          secondary: 'var(--bg-secondary)',
+                        },
+                      },
+                    }}
+                  />
+                </div>
               </Router>
-            </WebSocketProvider>
-          </ThemeProvider>
-        </AuthProvider>
-        <ReactQueryDevtools initialIsOpen={false} position="bottom-right" />
+            </AuthProvider>
+          </NotificationProvider>
+        </ThemeProvider>
+        
+        {/* React Query DevTools - Only in development */}
+        {process.env.NODE_ENV === 'development' && (
+          <ReactQueryDevtools initialIsOpen={false} position="bottom-right" />
+        )}
       </QueryClientProvider>
     </ErrorBoundary>
   );
-};
+}
 
-export default App;
+// Performance optimization: Memoize the App component
+export default React.memo(App);
