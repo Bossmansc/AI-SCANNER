@@ -1,53 +1,39 @@
-# Core Web Framework & Server
+# Core Framework
 fastapi>=0.109.0
 uvicorn[standard]>=0.27.0
-gunicorn>=21.2.0
+pydantic>=2.6.0
+pydantic-settings>=2.1.0
 
-# Database & ORM (Async + Sync)
+# Database & ORM
 sqlalchemy>=2.0.25
 alembic>=1.13.1
 asyncpg>=0.29.0
-psycopg2-binary>=2.9.9
+psycopg2-binary>=2.9.9  # For synchronous operations/migrations if needed
 
-# Data Validation & Settings
-pydantic>=2.6.0
-pydantic-settings>=2.1.0
-email-validator>=2.1.0
-
-# Security, Authentication & Cryptography
-python-jose[cryptography]>=3.3.0
-passlib[bcrypt]>=1.7.4
-bcrypt>=4.1.2
-python-multipart>=0.0.7
-
-# Networking & HTTP Clients
-httpx>=0.26.0
-requests>=2.31.0
-
-# High Performance Utilities
-uvloop>=0.19.0; sys_platform != 'win32'
-orjson>=3.9.12
-
-# Caching & Message Brokering
+# Caching & Message Broker
 redis>=5.0.1
 celery>=5.3.6
 
-# Logging & Observability
-loguru>=0.7.2
-sentry-sdk>=1.40.0
+# HTTP Client
+httpx>=0.26.0
+requests>=2.31.0
 
-# General Utilities
+# Observability & Monitoring
+prometheus-fastapi-instrumentator>=6.1.0
+sentry-sdk[fastapi]>=1.40.0
+loguru>=0.7.2
+
+# Security & Auth
+python-jose[cryptography]>=3.3.0
+passlib[bcrypt]>=1.7.4
+python-multipart>=0.0.7
+
+# Utilities
 python-dotenv>=1.0.1
 tenacity>=8.2.3
+email-validator>=2.1.0.post1
 pytz>=2024.1
 uuid>=1.30
 
-# Testing & Quality Assurance
-pytest>=8.0.0
-pytest-asyncio>=0.23.5
-pytest-cov>=4.1.0
-httpx>=0.26.0  # Required for TestClient in async contexts
-black>=24.1.1
-isort>=5.13.2
-flake8>=7.0.0
-mypy>=1.8.0
+# Production Server Manager (Gunicorn manages Uvicorn workers)
+gunicorn>=21.2.0
