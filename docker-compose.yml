@@ -1,493 +1,459 @@
-# Redis Development Stack
-# Purpose: Local Redis service configuration for development and testing
-# Version: 2.4
-# Networks: Isolated 'redis-net' for secure service communication
-# Volumes: Persistent data storage for Redis instances
-# Healthchecks: Automated service health verification
-# Ports: Standard Redis ports with localhost binding for security
+version: '3.8'
 
-version: '2.4'
-
-# Define custom networks for service isolation
-networks:
-  redis-net:
-    driver: bridge
-    # Enable IPv6 for modern network testing
-    enable_ipv6: true
-    # Internal network for enhanced security
-    internal: false
-    ipam:
-      driver: default
-      config:
-        - subnet: "172.22.0.0/16"
-          gateway: "172.22.0.1"
-        - subnet: "2001:db8:1::/64"
-          gateway: "2001:db8:1::1"
-
-# Define persistent volumes for data storage
-volumes:
-  redis-data:
-    driver: local
-    # Labels for volume management
-    labels:
-      - "com.redis-stack.description=Primary Redis data volume"
-      - "com.redis-stack.backup=true"
-  redis-config:
-    driver: local
-    labels:
-      - "com.redis-stack.description=Redis configuration volume"
-  redis-insight-data:
-    driver: local
-    labels:
-      - "com.redis-stack.description=Redis Insight UI data volume"
-
-# Service definitions
 services:
-  # Primary Redis instance with persistence
-  redis:
-    image: redis:7.2-alpine
-    container_name: redis-primary
-    hostname: redis-primary
-    restart: unless-stopped
-    # Security: Run as non-root user
-    user: "1001:1001"
-    # Resource limits for development environment
-    deploy:
-      resources:
-        limits:
-          cpus: '1.0'
-          memory: 512M
-        reservations:
-          cpus: '0.5'
-          memory: 256M
-    # Command with optimized configuration
-    command: >
-      redis-server
-      --appendonly yes
-      --appendfsync everysec
-      --save 900 1
-      --save 300 10
-      --save 60 10000
-      --maxmemory 256mb
-      --maxmemory-policy allkeys-lru
-      --requirepass ${REDIS_PASSWORD:-devpassword123}
-      --bind 0.0.0.0
-      --port 6379
-    # Environment variables
+  # PostgreSQL Database
+  postgres:
+    image: postgres:15-alpine
+    container_name: app_postgres
     environment:
-      - REDIS_PASSWORD=${REDIS_PASSWORD:-devpassword123}
-      - REDIS_PORT=6379
-      - TZ=UTC
-    # Health check configuration
+      POSTGRES_USER: ${DB_USER:-app_user}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-secure_password}
+      POSTGRES_DB: ${DB_NAME:-app_db}
+    ports:
+      - "${DB_PORT:-5432}:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./init-db:/docker-entrypoint-initdb.d
+    networks:
+      - app_network
     healthcheck:
-      test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD:-devpassword123}", "--raw", "incr", "ping"]
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER:-app_user}"]
       interval: 10s
       timeout: 5s
       retries: 5
       start_period: 30s
-    # Port mapping (localhost binding for security)
-    ports:
-      - "127.0.0.1:6379:6379"
-    # Volume mounts for persistence
-    volumes:
-      - redis-data:/data
-      - redis-config:/usr/local/etc/redis
-      - ./redis.conf:/usr/local/etc/redis/redis.conf:ro
-      - ./scripts/healthcheck.sh:/healthcheck.sh:ro
-    # Network configuration
-    networks:
-      redis-net:
-        ipv4_address: 172.22.0.10
-        ipv6_address: 2001:db8:1::10
-    # Security options
-    security_opt:
-      - no-new-privileges:true
-    # Read-only root filesystem
-    read_only: true
-    # Logging configuration
-    logging:
-      driver: "json-file"
-      options:
-        max-size: "10m"
-        max-file: "3"
-        tag: "redis-primary"
-    # Labels for container management
-    labels:
-      - "com.redis-stack.role=primary"
-      - "com.redis-stack.environment=development"
-      - "com.redis-stack.maintenance.window=Sun:02:00-04:00"
-
-  # Redis replica for read scalability
-  redis-replica:
-    image: redis:7.2-alpine
-    container_name: redis-replica
-    hostname: redis-replica
     restart: unless-stopped
+
+  # Redis Cache
+  redis:
+    image: redis:7-alpine
+    container_name: app_redis
+    ports:
+      - "${REDIS_PORT:-6379}:6379"
+    volumes:
+      - redis_data:/data
+      - ./redis.conf:/usr/local/etc/redis/redis.conf
+    command: redis-server /usr/local/etc/redis/redis.conf
+    networks:
+      - app_network
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  # Main Application Backend (FastAPI/Node.js/Spring Boot - configurable)
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile.dev
+      args:
+        - NODE_ENV=development
+        - PYTHON_VERSION=3.11
+    container_name: app_backend
+    ports:
+      - "${BACKEND_PORT:-8000}:8000"
+    environment:
+      - DB_HOST=postgres
+      - DB_PORT=5432
+      - DB_USER=${DB_USER:-app_user}
+      - DB_PASSWORD=${DB_PASSWORD:-secure_password}
+      - DB_NAME=${DB_NAME:-app_db}
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - JWT_SECRET=${JWT_SECRET:-dev_jwt_secret_key_change_in_production}
+      - DEBUG=${DEBUG:-true}
+      - LOG_LEVEL=${LOG_LEVEL:-DEBUG}
+    volumes:
+      - ./backend:/app
+      - backend_node_modules:/app/node_modules
+      - backend_python_packages:/usr/local/lib/python3.11/site-packages
     depends_on:
+      postgres:
+        condition: service_healthy
       redis:
         condition: service_healthy
-    user: "1001:1001"
-    deploy:
-      resources:
-        limits:
-          cpus: '0.75'
-          memory: 256M
-        reservations:
-          cpus: '0.25'
-          memory: 128M
-    # Replica configuration
-    command: >
-      redis-server
-      --replicaof redis-primary 6379
-      --masterauth ${REDIS_PASSWORD:-devpassword123}
-      --requirepass ${REDIS_PASSWORD:-devpassword123}
-      --appendonly yes
-      --appendfsync everysec
-      --bind 0.0.0.0
-      --port 6380
-    environment:
-      - REDIS_PASSWORD=${REDIS_PASSWORD:-devpassword123}
-      - REDIS_MASTER_HOST=redis-primary
-      - REDIS_MASTER_PORT=6379
-      - REDIS_REPLICA_PORT=6380
-      - TZ=UTC
+    networks:
+      - app_network
     healthcheck:
-      test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD:-devpassword123}", "-p", "6380", "--raw", "info", "replication"]
-      interval: 15s
-      timeout: 5s
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
       retries: 3
       start_period: 40s
-    ports:
-      - "127.0.0.1:6380:6380"
-    volumes:
-      - redis-data:/data:ro
-      - ./scripts/replica-setup.sh:/setup.sh:ro
-    networks:
-      redis-net:
-        ipv4_address: 172.22.0.11
-        ipv6_address: 2001:db8:1::11
-    security_opt:
-      - no-new-privileges:true
-    read_only: true
-    logging:
-      driver: "json-file"
-      options:
-        max-size: "10m"
-        max-file: "3"
-        tag: "redis-replica"
-    labels:
-      - "com.redis-stack.role=replica"
-      - "com.redis-stack.environment=development"
-
-  # Redis Commander - Web-based management UI
-  redis-commander:
-    image: rediscommander/redis-commander:latest
-    container_name: redis-commander
-    hostname: redis-commander
     restart: unless-stopped
-    depends_on:
-      redis:
-        condition: service_healthy
-      redis-replica:
-        condition: service_started
-    user: "1001:1001"
-    deploy:
-      resources:
-        limits:
-          cpus: '0.5'
-          memory: 128M
-        reservations:
-          cpus: '0.25'
-          memory: 64M
+    stdin_open: true
+    tty: true
+
+  # Frontend Application (React/Vue/Angular - configurable)
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile.dev
+      args:
+        - NODE_ENV=development
+    container_name: app_frontend
+    ports:
+      - "${FRONTEND_PORT:-3000}:3000"
     environment:
-      - REDIS_HOSTS=local:redis-primary:6379,local-replica:redis-replica:6380
-      - REDIS_PASSWORD=devpassword123
-      - HTTP_USER=${REDIS_COMMANDER_USER:-admin}
-      - HTTP_PASSWORD=${REDIS_COMMANDER_PASSWORD:-admin123}
-      - REDIS_PORT=6379
-      - REDIS_REPLICA_PORT=6380
-      - TZ=UTC
-      - HTTP_BASIC_AUTH_PASSWORD_HASH=${REDIS_COMMANDER_HASH:-}
+      - REACT_APP_API_URL=http://localhost:8000/api
+      - REACT_APP_WS_URL=ws://localhost:8000/ws
+      - NODE_ENV=development
+    volumes:
+      - ./frontend:/app
+      - frontend_node_modules:/app/node_modules
+    depends_on:
+      - backend
+    networks:
+      - app_network
     healthcheck:
-      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:8081/health"]
+      test: ["CMD", "curl", "-f", "http://localhost:3000"]
       interval: 30s
       timeout: 10s
       retries: 3
       start_period: 60s
-    ports:
-      - "127.0.0.1:8081:8081"
-    volumes:
-      - ./redis-commander.json:/redis-commander/config/local-production.json:ro
-    networks:
-      redis-net:
-        ipv4_address: 172.22.0.12
-        ipv6_address: 2001:db8:1::12
-    security_opt:
-      - no-new-privileges:true
-    logging:
-      driver: "json-file"
-      options:
-        max-size: "10m"
-        max-file: "3"
-        tag: "redis-commander"
-    labels:
-      - "com.redis-stack.role=management-ui"
-      - "com.redis-stack.environment=development"
-
-  # Redis Insight - Official Redis GUI
-  redis-insight:
-    image: redislabs/redisinsight:latest
-    container_name: redis-insight
-    hostname: redis-insight
     restart: unless-stopped
+
+  # NGINX Reverse Proxy (optional, for production-like routing)
+  nginx:
+    image: nginx:1.25-alpine
+    container_name: app_nginx
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf
+      - ./nginx/conf.d:/etc/nginx/conf.d
+      - ./ssl:/etc/nginx/ssl
+      - ./frontend/build:/usr/share/nginx/html
     depends_on:
-      redis:
-        condition: service_healthy
-    user: "1001:1001"
-    deploy:
-      resources:
-        limits:
-          cpus: '1.0'
-          memory: 512M
-        reservations:
-          cpus: '0.5'
-          memory: 256M
+      - backend
+      - frontend
+    networks:
+      - app_network
+    restart: unless-stopped
+
+  # Elasticsearch for logging and search
+  elasticsearch:
+    image: elasticsearch:8.11.0
+    container_name: app_elasticsearch
     environment:
-      - REDIS_PASSWORD=${REDIS_PASSWORD:-devpassword123}
-      - RITRUSTEDORIGINS=http://localhost:8001
-      - RIHOST=0.0.0.0
-      - RIPORT=8001
-      - TZ=UTC
+      - discovery.type=single-node
+      - xpack.security.enabled=false
+      - "ES_JAVA_OPTS=-Xms512m -Xmx512m"
+    ports:
+      - "${ELASTIC_PORT:-9200}:9200"
+    volumes:
+      - elasticsearch_data:/usr/share/elasticsearch/data
+    networks:
+      - app_network
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8001/health"]
+      test: ["CMD", "curl", "-f", "http://localhost:9200"]
       interval: 30s
       timeout: 10s
-      retries: 3
-      start_period: 90s
-    ports:
-      - "127.0.0.1:8001:8001"
-    volumes:
-      - redis-insight-data:/db
-      - ./redisinsight-config.json:/config.json:ro
-    networks:
-      redis-net:
-        ipv4_address: 172.22.0.13
-        ipv6_address: 2001:db8:1::13
-    security_opt:
-      - no-new-privileges:true
-    logging:
-      driver: "json-file"
-      options:
-        max-size: "10m"
-        max-file: "3"
-        tag: "redis-insight"
-    labels:
-      - "com.redis-stack.role=insight-ui"
-      - "com.redis-stack.environment=development"
-
-  # Redis Exporter for Prometheus metrics
-  redis-exporter:
-    image: oliver006/redis_exporter:latest
-    container_name: redis-exporter
-    hostname: redis-exporter
+      retries: 5
+      start_period: 60s
     restart: unless-stopped
-    depends_on:
-      redis:
-        condition: service_healthy
-      redis-replica:
-        condition: service_started
-    user: "1001:1001"
-    deploy:
-      resources:
-        limits:
-          cpus: '0.25'
-          memory: 64M
-        reservations:
-          cpus: '0.1'
-          memory: 32M
-    command: >
-      --redis.addr=redis://redis-primary:6379
-      --redis.password=${REDIS_PASSWORD:-devpassword123}
-      --redis.addr=redis://redis-replica:6380
-      --redis.password=${REDIS_PASSWORD:-devpassword123}
-      --web.listen-address=:9121
-      --log-format=json
-      --debug
+
+  # Kibana for Elasticsearch visualization
+  kibana:
+    image: kibana:8.11.0
+    container_name: app_kibana
     environment:
-      - REDIS_PASSWORD=${REDIS_PASSWORD:-devpassword123}
-      - TZ=UTC
-    healthcheck:
-      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:9121/metrics"]
-      interval: 30s
-      timeout: 5s
-      retries: 3
-      start_period: 30s
+      - ELASTICSEARCH_HOSTS=http://elasticsearch:9200
     ports:
-      - "127.0.0.1:9121:9121"
-    networks:
-      redis-net:
-        ipv4_address: 172.22.0.14
-        ipv6_address: 2001:db8:1::14
-    security_opt:
-      - no-new-privileges:true
-    read_only: true
-    logging:
-      driver: "json-file"
-      options:
-        max-size: "10m"
-        max-file: "3"
-        tag: "redis-exporter"
-    labels:
-      - "com.redis-stack.role=metrics-exporter"
-      - "com.redis-stack.environment=development"
-
-  # Redis CLI utility container
-  redis-cli:
-    image: redis:7.2-alpine
-    container_name: redis-cli-util
-    hostname: redis-cli-util
-    restart: "no"
+      - "${KIBANA_PORT:-5601}:5601"
     depends_on:
+      elasticsearch:
+        condition: service_healthy
+    networks:
+      - app_network
+    restart: unless-stopped
+
+  # RabbitMQ for message queueing
+  rabbitmq:
+    image: rabbitmq:3.12-management-alpine
+    container_name: app_rabbitmq
+    environment:
+      - RABBITMQ_DEFAULT_USER=${RABBITMQ_USER:-admin}
+      - RABBITMQ_DEFAULT_PASS=${RABBITMQ_PASSWORD:-admin_pass}
+    ports:
+      - "${RABBITMQ_PORT:-5672}:5672"
+      - "${RABBITMQ_MANAGEMENT_PORT:-15672}:15672"
+    volumes:
+      - rabbitmq_data:/var/lib/rabbitmq
+    networks:
+      - app_network
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "ping"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+    restart: unless-stopped
+
+  # Celery Worker (for Python backend)
+  celery_worker:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile.dev
+    container_name: app_celery_worker
+    command: celery -A app.celery worker --loglevel=info
+    environment:
+      - DB_HOST=postgres
+      - DB_PORT=5432
+      - DB_USER=${DB_USER:-app_user}
+      - DB_PASSWORD=${DB_PASSWORD:-secure_password}
+      - DB_NAME=${DB_NAME:-app_db}
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - CELERY_BROKER_URL=redis://redis:6379/0
+      - CELERY_RESULT_BACKEND=redis://redis:6379/0
+    volumes:
+      - ./backend:/app
+      - backend_python_packages:/usr/local/lib/python3.11/site-packages
+    depends_on:
+      postgres:
+        condition: service_healthy
       redis:
         condition: service_healthy
-    user: "1001:1001"
-    deploy:
-      resources:
-        limits:
-          cpus: '0.25'
-          memory: 32M
-        reservations:
-          cpus: '0.1'
-          memory: 16M
-    stdin_open: true
-    tty: true
-    command: >
-      sh -c "
-      echo 'Waiting for Redis to be ready...' &&
-      until redis-cli -h redis-primary -p 6379 -a ${REDIS_PASSWORD:-devpassword123} ping | grep -q PONG; do
-        sleep 1;
-      done &&
-      echo 'Redis is ready. Starting CLI...' &&
-      redis-cli -h redis-primary -p 6379 -a ${REDIS_PASSWORD:-devpassword123}
-      "
-    environment:
-      - REDIS_PASSWORD=${REDIS_PASSWORD:-devpassword123}
-      - TZ=UTC
-    volumes:
-      - ./scripts:/scripts:ro
-      - ./data:/data:rw
+      rabbitmq:
+        condition: service_healthy
     networks:
-      redis-net:
-        ipv4_address: 172.22.0.15
-        ipv6_address: 2001:db8:1::15
-    security_opt:
-      - no-new-privileges:true
-    read_only: false
-    logging:
-      driver: "json-file"
-      options:
-        max-size: "5m"
-        max-file: "2"
-        tag: "redis-cli"
-    labels:
-      - "com.redis-stack.role=cli-utility"
-      - "com.redis-stack.environment=development"
+      - app_network
+    restart: unless-stopped
 
-# Custom configuration sections
-x-redis-defaults: &redis-defaults
-  restart: unless-stopped
-  user: "1001:1001"
-  networks:
-    - redis-net
-  security_opt:
-    - no-new-privileges:true
-  logging: &default-logging
-    driver: "json-file"
-    options:
-      max-size: "10m"
-      max-file: "3"
+  # Celery Beat (for scheduled tasks)
+  celery_beat:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile.dev
+    container_name: app_celery_beat
+    command: celery -A app.celery beat --loglevel=info
+    environment:
+      - DB_HOST=postgres
+      - DB_PORT=5432
+      - DB_USER=${DB_USER:-app_user}
+      - DB_PASSWORD=${DB_PASSWORD:-secure_password}
+      - DB_NAME=${DB_NAME:-app_db}
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - CELERY_BROKER_URL=redis://redis:6379/0
+      - CELERY_RESULT_BACKEND=redis://redis:6379/0
+    volumes:
+      - ./backend:/app
+      - backend_python_packages:/usr/local/lib/python3.11/site-packages
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+    networks:
+      - app_network
+    restart: unless-stopped
 
-x-healthcheck-defaults: &healthcheck-defaults
-  interval: 30s
-  timeout: 10s
-  retries: 3
-  start_period: 30s
+  # MailHog for email testing
+  mailhog:
+    image: mailhog/mailhog
+    container_name: app_mailhog
+    ports:
+      - "${MAILHOG_SMTP_PORT:-1025}:1025"
+      - "${MAILHOG_WEB_PORT:-8025}:8025"
+    networks:
+      - app_network
+    restart: unless-stopped
 
-x-resource-defaults: &resource-defaults
-  deploy:
-    resources:
-      limits:
-        cpus: '0.5'
-        memory: 256M
-      reservations:
-        cpus: '0.25'
-        memory: 128M
+  # Prometheus for metrics
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: app_prometheus
+    ports:
+      - "${PROMETHEUS_PORT:-9090}:9090"
+    volumes:
+      - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml
+      - prometheus_data:/prometheus
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--web.console.libraries=/etc/prometheus/console_libraries'
+      - '--web.console.templates=/etc/prometheus/consoles'
+      - '--storage.tsdb.retention.time=200h'
+      - '--web.enable-lifecycle'
+    networks:
+      - app_network
+    restart: unless-stopped
 
-# Service aliases for easier access
-x-service-aliases:
-  primary: &redis-primary redis://redis-primary:6379
-  replica: &redis-replica redis://redis-replica:6380
-  commander: &redis-commander http://localhost:8081
-  insight: &redis-insight http://localhost:8001
-  exporter: &redis-exporter http://localhost:9121
+  # Grafana for metrics visualization
+  grafana:
+    image: grafana/grafana:latest
+    container_name: app_grafana
+    ports:
+      - "${GRAFANA_PORT:-3001}:3000"
+    environment:
+      - GF_SECURITY_ADMIN_USER=${GRAFANA_USER:-admin}
+      - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_PASSWORD:-admin}
+      - GF_INSTALL_PLUGINS=grafana-piechart-panel
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ./grafana/provisioning:/etc/grafana/provisioning
+    depends_on:
+      - prometheus
+    networks:
+      - app_network
+    restart: unless-stopped
 
-# Environment variable defaults (for .env file generation)
-x-env-defaults:
-  REDIS_PASSWORD: "devpassword123"
-  REDIS_COMMANDER_USER: "admin"
-  REDIS_COMMANDER_PASSWORD: "admin123"
-  REDIS_COMMANDER_HASH: ""
-  REDIS_DATA_DIR: "./data"
-  REDIS_CONFIG_DIR: "./config"
-  REDIS_SCRIPTS_DIR: "./scripts"
+  # Jaeger for distributed tracing
+  jaeger:
+    image: jaegertracing/all-in-one:latest
+    container_name: app_jaeger
+    ports:
+      - "${JAEGER_UI_PORT:-16686}:16686"
+      - "${JAEGER_COLLECTOR_PORT:-14268}:14268"
+      - "${JAEGER_AGENT_PORT:-6831}:6831/udp"
+    environment:
+      - COLLECTOR_OTLP_ENABLED=true
+    networks:
+      - app_network
+    restart: unless-stopped
 
-# Volume configuration defaults
-x-volume-defaults:
-  driver: local
-  driver_opts:
-    type: none
-    o: bind
-    device: ${PWD}/data
+  # MinIO for S3-compatible object storage
+  minio:
+    image: minio/minio:latest
+    container_name: app_minio
+    ports:
+      - "${MINIO_API_PORT:-9000}:9000"
+      - "${MINIO_CONSOLE_PORT:-9001}:9001"
+    environment:
+      - MINIO_ROOT_USER=${MINIO_ROOT_USER:-minioadmin}
+      - MINIO_ROOT_PASSWORD=${MINIO_ROOT_PASSWORD:-minioadmin}
+    volumes:
+      - minio_data:/data
+    command: server /data --console-address ":9001"
+    networks:
+      - app_network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 30s
+      timeout: 20s
+      retries: 3
+    restart: unless-stopped
 
-# Network configuration defaults
-x-network-defaults:
-  driver: bridge
-  attachable: true
-  external: false
+  # PostgreSQL Admin (pgAdmin)
+  pgadmin:
+    image: dpage/pgadmin4:latest
+    container_name: app_pgadmin
+    environment:
+      PGADMIN_DEFAULT_EMAIL: ${PGADMIN_EMAIL:-admin@admin.com}
+      PGADMIN_DEFAULT_PASSWORD: ${PGADMIN_PASSWORD:-admin}
+      PGADMIN_CONFIG_SERVER_MODE: 'False'
+    ports:
+      - "${PGADMIN_PORT:-5050}:80"
+    volumes:
+      - pgadmin_data:/var/lib/pgadmin
+    depends_on:
+      - postgres
+    networks:
+      - app_network
+    restart: unless-stopped
 
-# Port mapping documentation
-x-port-mappings:
-  redis-primary: "6379/tcp -> 127.0.0.1:6379"
-  redis-replica: "6380/tcp -> 127.0.0.1:6380"
-  redis-commander: "8081/tcp -> 127.0.0.1:8081"
-  redis-insight: "8001/tcp -> 127.0.0.1:8001"
-  redis-exporter: "9121/tcp -> 127.0.0.1:9121"
+  # MongoDB (optional document database)
+  mongodb:
+    image: mongo:7.0
+    container_name: app_mongodb
+    ports:
+      - "${MONGODB_PORT:-27017}:27017"
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: ${MONGO_USER:-admin}
+      MONGO_INITDB_ROOT_PASSWORD: ${MONGO_PASSWORD:-admin}
+    volumes:
+      - mongodb_data:/data/db
+    networks:
+      - app_network
+    restart: unless-stopped
 
-# Health check endpoints
-x-health-endpoints:
-  redis-primary: "redis-cli -a $REDIS_PASSWORD ping"
-  redis-replica: "redis-cli -a $REDIS_PASSWORD -p 6380 info replication"
-  redis-commander: "http://localhost:8081/health"
-  redis-insight: "http://localhost:8001/health"
-  redis-exporter: "http://localhost:9121/metrics"
+  # MongoDB Express (web admin for MongoDB)
+  mongo-express:
+    image: mongo-express:latest
+    container_name: app_mongo_express
+    ports:
+      - "${MONGO_EXPRESS_PORT:-8081}:8081"
+    environment:
+      ME_CONFIG_MONGODB_ADMINUSERNAME: ${MONGO_USER:-admin}
+      ME_CONFIG_MONGODB_ADMINPASSWORD: ${MONGO_PASSWORD:-admin}
+      ME_CONFIG_MONGODB_SERVER: mongodb
+      ME_CONFIG_BASICAUTH_USERNAME: ${MONGO_EXPRESS_USER:-admin}
+      ME_CONFIG_BASICAUTH_PASSWORD: ${MONGO_EXPRESS_PASSWORD:-admin}
+    depends_on:
+      - mongodb
+    networks:
+      - app_network
+    restart: unless-stopped
 
-# Usage instructions
-x-usage:
-  start: "docker-compose up -d"
-  stop: "docker-compose down"
-  restart: "docker-compose restart"
-  logs: "docker-compose logs -f"
-  status: "docker-compose ps"
-  cli: "docker-compose exec redis-cli"
-  backup: "docker-compose exec redis-primary redis-cli -a $REDIS_PASSWORD save"
-  monitor: "docker-compose exec redis-primary redis-cli -a $REDIS_PASSWORD monitor"
-  info: "docker-compose exec redis-primary redis-cli -a $REDIS_PASSWORD info"
-  flush: "docker-compose exec redis-primary redis-cli -a $REDIS_PASSWORD flushall"
-  stats: "docker-compose exec redis-primary redis-cli -a $REDIS_PASSWORD info stats"
+  # LocalStack for AWS services emulation
+  localstack:
+    image: localstack/localstack:latest
+    container_name: app_localstack
+    ports:
+      - "${LOCALSTACK_EDGE_PORT:-4566}:4566"
+    environment:
+      - SERVICES=s3,sqs,sns,dynamodb,lambda,apigateway
+      - DEBUG=1
+      - DATA_DIR=/tmp/localstack/data
+      - DOCKER_HOST=unix:///var/run/docker.sock
+    volumes:
+      - localstack_data:/tmp/localstack
+      - /var/run/docker.sock:/var/run/docker.sock
+    networks:
+      - app_network
+    restart: unless-stopped
 
-# Security notes
-x-security-notes:
-  - "All services run as non-root user (UID 1001)"
-  - "Root filesystem is read-only where possible"
-  - "No new privileges can be gained"
-  -
+  # Portainer for Docker management
+  portainer:
+    image: portainer/portainer-ce:latest
+    container_name: app_portainer
+    ports:
+      - "${PORTAINER_PORT:-9000}:9000"
+      - "${PORTAINER_SSL_PORT:-9443}:9443"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - portainer_data:/data
+    networks:
+      - app_network
+    restart: unless-stopped
+
+networks:
+  app_network:
+    driver: bridge
+    name: app_network
+
+volumes:
+  postgres_data:
+    driver: local
+  redis_data:
+    driver: local
+  backend_node_modules:
+    driver: local
+  backend_python_packages:
+    driver: local
+  frontend_node_modules:
+    driver: local
+  elasticsearch_data:
+    driver: local
+  rabbitmq_data:
+    driver: local
+  prometheus_data:
+    driver: local
+  grafana_data:
+    driver: local
+  minio_data:
+    driver: local
+  pgadmin_data:
+    driver: local
+  mongodb_data:
+    driver: local
+  localstack_data:
+    driver: local
+  portainer_data:
+    driver: local
