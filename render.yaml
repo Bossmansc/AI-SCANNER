@@ -17,3 +17,5 @@ services:
         value: 3.10.13
       - key: CARGO_HOME
         value: /opt/render/project/src/.cargo
+      - key: RUSTUP_HOME
+        value: /opt/render/project/src/.rustup
