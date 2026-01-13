@@ -1,723 +1,114 @@
-# Core Python Web Framework & ASGI Server
-fastapi==0.104.1
-uvicorn[standard]==0.24.0
-
-# Database & ORM
-sqlalchemy==2.0.23
-alembic==1.12.1
-psycopg2-binary==2.9.9
-asyncpg==0.29.0
-aiosqlite==0.19.0
-
-# Redis & Caching
-redis==5.0.1
-aioredis==2.0.1
-hiredis==2.2.3
-
-# Message Queue & Task Processing
-celery==5.3.4
-redis==5.0.1  # Also used by Celery
-kombu==5.3.4
-flower==2.0.1
-
-# API Documentation & Validation
-pydantic==2.5.0
-pydantic-settings==2.1.0
-python-multipart==0.0.6
-
-# Authentication & Security
-python-jose[cryptography]==3.3.0
-passlib[bcrypt]==1.7.4
-cryptography==41.0.7
-pyjwt==2.8.0
-bcrypt==4.1.2
-
-# HTTP Client & Async Requests
-httpx==0.25.1
-aiohttp==3.9.1
-
-# Monitoring & Observability
-prometheus-client==0.19.0
-opentelemetry-api==1.21.0
-opentelemetry-sdk==1.21.0
-opentelemetry-instrumentation-fastapi==0.41b0
-opentelemetry-instrumentation-sqlalchemy==0.41b0
-
-# Logging & Tracing
-structlog==23.2.0
-python-json-logger==2.0.7
-jaeger-client==4.8.0
-
-# Configuration & Environment
-python-dotenv==1.0.0
-dynaconf==3.2.4
-
-# Testing
-pytest==7.4.3
-pytest-asyncio==0.21.1
-pytest-cov==4.1.0
-pytest-mock==3.12.0
-httpx==0.25.1  # Also used for testing
-factory-boy==3.3.0
-freezegun==1.2.2
-
-# Code Quality & Formatting
-black==23.11.0
-isort==5.12.0
-flake8==6.1.0
-mypy==1.7.1
-pre-commit==3.5.0
-
-# Development Tools
-ipython==8.17.2
-jupyter==1.0.0
-watchfiles==0.21.0
-python-dotenv==1.0.0  # Also used for development
-
-# Data Processing & Serialization
-pandas==2.1.3
-numpy==1.26.2
-orjson==3.9.10
-msgpack==1.0.7
-
-# File Storage & Cloud Services
-boto3==1.34.0
-minio==7.2.2
-python-magic==0.4.27
-
-# Email & Notifications
-smtpdfix==0.4.4
-jinja2==3.1.2
-
-# WebSockets & Real-time
-websockets==12.0
-python-socketio==5.10.0
-
-# Rate Limiting & Throttling
-slowapi==0.1.8
-limits==3.6.1
-
-# Background Tasks & Scheduling
-apscheduler==3.10.4
-schedule==1.2.0
-
-# Search & Indexing
-elasticsearch==8.11.0
-whoosh==2.7.4
-
-# GraphQL Support
-strawberry-graphql==0.215.2
-graphql-core==3.2.3
-
-# API Versioning
-fastapi-versioning==0.10.0
-
-# Health Checks
-healthchecks==2.6.0
-
-# CORS & Security Middleware
-fastapi-cors==0.1.0
-
-# Compression
-brotli==1.1.0
+# ------------------------------------------------------------------------------
+# CORE FRAMEWORK & SERVER
+# High-performance ASGI framework and server components
+# ------------------------------------------------------------------------------
+fastapi==0.109.2
+    # The web framework. Pinned for stability with Pydantic v2.
+uvicorn[standard]==0.27.1
+    # ASGI server. 'standard' includes uvloop and httptools for performance.
 gunicorn==21.2.0
-
-# CLI & Management
-typer==0.9.0
-rich==13.7.0
-click==8.1.7
-
-# Database Migration & Management
-sqlacodegen==3.0.0rc4
-
-# API Client Generation
-openapi-python-client==0.16.1
-
-# PDF Generation & Document Processing
-reportlab==4.0.9
-pypdf==3.17.1
-
-# Image Processing
-pillow==10.1.0
-
-# Excel & CSV Processing
-openpyxl==3.1.2
-xlrd==2.0.1
-
-# Date & Time Handling
-pytz==2023.3.post1
-pendulum==2.1.2
-
-# System & Process Management
-psutil==5.9.7
-py-cpuinfo==9.0.0
-
-# Network & DNS
-dnspython==2.4.2
-
-# Cryptography & Hashing
-hashids==1.3.1
-argon2-cffi==23.1.0
-
-# Validation & Sanitization
-validators==0.22.0
-bleach==6.1.0
-
-# Internationalization & Localization
-babel==2.13.1
-
-# QR Code Generation
-qrcode==7.4.2
-
-# Web Scraping & Parsing
-beautifulsoup4==4.12.2
-lxml==4.9.3
-
-# Machine Learning & AI (Optional)
-scikit-learn==1.3.2
-tensorflow==2.15.0
-torch==2.1.1
-transformers==4.36.0
-
-# Natural Language Processing
-nltk==3.8.1
-spacy==3.7.2
-
-# Computer Vision
-opencv-python==4.8.1.78
-
-# Audio Processing
-pydub==0.25.1
-librosa==0.10.1
-
-# Geo-Spatial Data
-geopy==2.4.1
-shapely==2.0.2
-
-# Financial Calculations
-numpy-financial==1.0.0
-
-# Scientific Computing
-scipy==1.11.4
-
-# Visualization
-matplotlib==3.8.2
-plotly==5.18.0
-seaborn==0.13.0
-
-# Database Drivers (Additional)
-pymongo==4.6.1
-motor==3.3.2
-cassandra-driver==3.28.0
-
-# Message Brokers (Additional)
-pika==1.3.2
-confluent-kafka==2.2.0
-
-# Containerization & Deployment
-docker==6.1.3
-kubernetes==28.1.0
-
-# Infrastructure as Code
-ansible==9.1.0
-terraform==0.1.0
-
-# Cloud Providers
-google-cloud-storage==2.13.0
-azure-storage-blob==12.19.0
-boto3==1.34.0  # AWS, already listed
-
-# Monitoring & Alerting
-sentry-sdk==1.38.0
-newrelic==8.12.0.176
-
-# Performance Profiling
-py-spy==0.3.14
-memory-profiler==0.61.0
-
-# Security Scanning
-bandit==1.7.7
-safety==2.3.5
-
-# API Testing & Documentation
-postman-code-generators==0.1.14
-prance==0.22.11
-
-# Web Framework Utilities
-fastapi-utils==0.2.1
-fastapi-pagination==0.12.0
-
-# Database Utilities
-sqlalchemy-utils==0.41.1
-sqlalchemy-mixins==1.5.2
-
-# Cache Utilities
-cachetools==5.3.2
-diskcache==5.6.3
-
-# Job Scheduling Utilities
-dramatiq==1.15.2
-rq==1.15.1
-
-# File Format Support
-pyyaml==6.0.1
-toml==0.10.2
-configparser==6.0.0
-
-# System Integration
-python-daemon==3.0.1
-systemd-python==235
-
-# Hardware Integration
-pyserial==3.5
-RPi.GPIO==0.7.1
-
-# Game Development (Optional)
-pygame==2.5.2
-
-# GUI Development (Optional)
-pyqt5==5.15.10
-tkinter==0.1.0
-
-# Blockchain & Cryptocurrency (Optional)
-web3==6.11.1
-bitcoinlib==0.6.16
-
-# Bioinformatics (Optional)
-biopython==1.81
-
-# Astronomy (Optional)
-astropy==5.3.4
-
-# Chemistry (Optional)
-rdkit==2023.9.5
-
-# Physics (Optional)
-sympy==1.12
-
-# Mathematics
-mpmath==1.3.0
-
-# Education
-jupyterlab==4.0.10
-
-# Documentation
-sphinx==7.2.6
-mkdocs==1.5.3
-
-# Version Control
-gitpython==3.1.40
-
-# Package Management
-pip-tools==7.4.0
-poetry==1.7.1
-
-# Virtual Environments
-virtualenv==20.24.6
-
-# Build Tools
-setuptools==68.2.2
-wheel==0.41.3
-twine==4.0.2
-
-# Code Analysis
-radon==6.0.1
-vulture==2.10
-
-# Testing Utilities
-coverage==7.4.0
-pytest-benchmark==4.0.0
-pytest-xdist==3.5.0
-
-# Mocking & Stubbing
-responses==0.24.1
-vcrpy==5.2.0
-
-# API Mocking
-prism==0.4.0
-
-# Load Testing
-locust==2.20.1
-
-# Browser Automation
-selenium==4.15.2
-playwright==1.40.0
-
-# Mobile Development
-kivy==2.2.1
-
-# Desktop Applications
-pyinstaller==6.2.0
-
-# Embedded Systems
-micropython==1.21.0
-
-# Robotics
-roslibpy==1.3.0
-
-# IoT
-paho-mqtt==1.6.1
-
-# Voice & Speech
-speechrecognition==3.10.1
-pyttsx3==2.90
-
-# Game AI
-gym==0.26.2
-
-# Reinforcement Learning
-stable-baselines3==2.1.0
-
-# Deep Learning Frameworks
-keras==2.15.0
-pytorch-lightning==2.1.1
-
-# Model Serving
-mlflow==2.9.2
-bentoml==1.1.6
-
-# Data Versioning
-dvc==3.41.0
-
-# Workflow Orchestration
-prefect==2.14.5
-airflow==2.7.3
-
-# Data Pipelines
-luigi==3.3.0
-
-# Stream Processing
-faust==1.10.4
-
-# Real-time Analytics
-apache-flink==1.18.1
-
-# Big Data
-pyspark==3.5.0
-
-# Data Warehousing
-snowflake-connector-python==3.5.0
-
-# Business Intelligence
-superset==3.0.0
-
-# ETL Tools
-bonobo==0.6.4
-
-# Data Validation
-great-expectations==0.18.4
-
-# Feature Stores
-feast==0.32.0
-
-# Experiment Tracking
-wandb==0.16.1
-comet-ml==3.35.0
-
-# Hyperparameter Optimization
-optuna==3.5.0
-
-# AutoML
-tpot==0.11.7
-
-# Explainable AI
-shap==0.44.0
-lime==0.2.0
-
-# Fairness & Bias
-aif360==0.5.0
-
-# Privacy & Security
-diffprivlib==0.6.2
-
-# Federated Learning
-flower==1.7.0
-
-# Quantum Computing
-qiskit==1.0.0
-
-# AR/VR
-pyglet==2.0.10
-
-# 3D Graphics
-pyopengl==3.1.7
-
-# Simulation
-simpy==4.0.1
-
-# Network Analysis
-networkx==3.2.1
-
-# Social Network Analysis
-python-louvain==0.16
-
-# Natural Language Generation
-gpt-2-simple==0.7.2
-
-# Chatbots
-chatterbot==1.0.8
-
-# OCR
-pytesseract==0.3.10
-
-# Barcode Generation
-python-barcode==0.14.0
-
-# Face Recognition
-face-recognition==1.3.0
-
-# Object Detection
-ultralytics==8.0.196
-
-# Image Segmentation
-segmentation-models-pytorch==0.3.3
-
-# Style Transfer
-neural-style-transfer==1.0.0
-
-# GANs
-pytorch-gan==0.1.0
-
-# Reinforcement Learning Environments
-gymnasium==0.29.1
-
-# Multi-agent Systems
-pettingzoo==1.24.1
-
-# Game Theory
-nashpy==0.0.35
-
-# Optimization
-pymoo==0.6.0
-
-# Statistics
-statsmodels==0.14.1
-
-# Econometrics
-linearmodels==5.2
-
-# Time Series
-prophet==1.1.5
-
-# Anomaly Detection
-pyod==1.1.0
-
-# Clustering
-hdbscan==0.8.33
-
-# Dimensionality Reduction
-umap-learn==0.5.5
-
-# Graph Neural Networks
-torch-geometric==2.4.0
-
-# Recommender Systems
-surprise==1.1.3
-
-# Association Rules
-mlxtend==0.22.0
-
-# Text Processing
-textblob==0.18.0
-
-# Sentiment Analysis
-vaderSentiment==3.3.2
-
-# Topic Modeling
-gensim==4.3.2
-
-# Word Embeddings
-fasttext==0.9.2
-
-# Translation
-googletrans==4.0.0rc1
-
-# Summarization
-sumy==0.11.0
-
-# Question Answering
-haystack==1.23.0
-
-# Knowledge Graphs
-kglab==0.5.5
-
-# Ontology
-owlready2==0.41
-
-# Semantic Web
-rdflib==7.0.0
-
-# Linked Data
-sparqlwrapper==2.0.0
-
-# Database of Databases
-tinydb==4.8.0
-
-# Graph Databases
-neo4j==5.14.0
-
-# Time Series Databases
-influxdb==5.3.1
-
-# Search Engines
-whoosh==2.7.4  # Already listed
-
-# Full-text Search
-whoosh==2.7.4  # Already listed
-
-# Vector Databases
-chromadb==0.4.15
-
-# Similarity Search
-annoy==1.17.3
-
-# Approximate Nearest Neighbors
-faiss-cpu==1.7.4
-
-# HNSW
-hnswlib==0.7.0
-
-# Quantization
-scann==1.2.9
-
-# Compression Algorithms
-zstandard==0.22.0
-
-# Serialization Protocols
-protobuf==4.25.1
-
-# RPC Frameworks
-grpcio==1.59.3
-
-# GraphQL Servers
-ariadne==0.19.0
-
-# REST Frameworks
-flask==3.0.0
-django==5.0
-
-# Async Frameworks
-tornado==6.4
-sanic==23.9.0
-
-# Microservices
-nameko==3.0.0
-
-# Service Mesh
-linkerd==0.1.0
-
-# API Gateways
-kong==0.1.0
-
-# Service Discovery
-consul==1.2.0
-
-# Configuration Management
-etcd3==0.12.0
-
-# Secret Management
-vault==0.1.0
-
-# Certificate Management
-certbot==2.7.4
-
-# SSL/TLS
-pyopenssl==23.2.0
-
-# Network Security
-scapy==2.5.0
-
-# Penetration Testing
-impacket==0.10.0
-
-# Forensics
-volatility3==2.5.0
-
-# Malware Analysis
-yara-python==4.3.1
-
-# Threat Intelligence
-mispy==0.1.0
-
-# Incident Response
-thehive==0.1.0
-
-# SIEM
-elasticsearch==8.11.0  # Already listed
-
-# Log Management
-logstash==0.1.0
-
-# Metrics Collection
-telegraf==0.1.0
-
-# Dashboarding
-grafana==0.1.0
-
-# Alert Management
-alertmanager==0.1.0
-
-# Notification Services
-twilio==8.9.0
-sendgrid==6.11.0
-
-# SMS Gateway
-plivo==4.24.0
-
-# Voice API
-vonage==3.0.0
-
-# Payment Processing
-stripe==7.6.0
-paypalrestsdk==1.13.1
-
-# E-commerce
-saleor==3.14.0
-
-# Shopping Cart
-oscar==3.2.0
-
-# Inventory Management
-odoo==16.0
-
-# CRM
-django-crm==0.1.0
-
-# ERP
-tryton==6.0.0
-
-# Accounting
-django-accounting==0.1.0
-
-# Invoicing
-django-invoicing==0.1.0
-
-# Project Management
-taiga==6.0.0
-
-# Help Desk
-zammad==0.1.0
-
-# Wiki
-wiki==0.1.0
-
-# Blog
-wagtail==5.2
-
-# CMS
-django-cms==3.11.0
-
-# Forum
-django-machina==1.3.0
-
-# Social Network
-django-allauth==0.57.0
-
-# Chat
-django-channels==4.0.0
-
-# Real-time Collaboration
-yjs==13.6.0
-
-# Video Conferencing
-jitsi==
+    # Process manager for production deployments.
+starlette==0.36.3
+    # Underlying ASGI toolkit. Pinned to match FastAPI requirements.
+
+# ------------------------------------------------------------------------------
+# DATA VALIDATION & SETTINGS
+# ------------------------------------------------------------------------------
+pydantic==2.6.1
+    # Data validation using Python type hints. V2 core.
+pydantic-core==2.16.2
+    # Core validation logic for Pydantic V2.
+pydantic-settings==2.2.1
+    # Management of environment variables and settings.
+email-validator==2.1.0.post1
+    # For Pydantic EmailStr validation.
+
+# ------------------------------------------------------------------------------
+# DATABASE (ORM & DRIVERS)
+# Async SQLAlchemy 2.0 stack with PostgreSQL
+# ------------------------------------------------------------------------------
+sqlalchemy==2.0.27
+    # ORM and SQL toolkit.
+alembic==1.13.1
+    # Database migration tool.
+asyncpg==0.29.0
+    # High-performance async PostgreSQL driver.
+greenlet==3.0.3
+    # Required for SQLAlchemy async IO support.
+
+# ------------------------------------------------------------------------------
+# CACHING & MESSAGE BROKER
+# ------------------------------------------------------------------------------
+redis==5.0.1
+    # Python client for Redis key-value store.
+
+# ------------------------------------------------------------------------------
+# SECURITY & AUTHENTICATION
+# ------------------------------------------------------------------------------
+passlib[bcrypt]==1.7.4
+    # Password hashing library.
+python-jose[cryptography]==3.3.0
+    # JWT (JSON Web Token) encoding and decoding.
+bcrypt==4.1.2
+    # Underlying hashing algorithm.
+cryptography==42.0.2
+    # Cryptographic recipes and primitives.
+
+# ------------------------------------------------------------------------------
+# HTTP CLIENT & NETWORKING
+# ------------------------------------------------------------------------------
+httpx==0.26.0
+    # Async HTTP client for making external API requests.
+httpcore==1.0.2
+    # Low-level HTTP transport layer for httpx.
+python-multipart==0.0.9
+    # Streaming multipart parser for file uploads.
+
+# ------------------------------------------------------------------------------
+# UTILITIES & LOGGING
+# ------------------------------------------------------------------------------
+python-dotenv==1.0.1
+    # Reads key-value pairs from a .env file.
+loguru==0.7.2
+    # Simplified and powerful logging.
+tenacity==8.2.3
+    # Retrying library for robust external connections.
+orjson==3.9.14
+    # Fast JSON serialization (optional, often used with FastAPI custom responses).
+
+# ------------------------------------------------------------------------------
+# TESTING (DEV DEPENDENCIES)
+# ------------------------------------------------------------------------------
+pytest==8.0.1
+    # Testing framework.
+pytest-asyncio==0.23.5
+    # Asyncio support for Pytest.
+pytest-cov==4.1.0
+    # Coverage reporting.
+
+# ------------------------------------------------------------------------------
+# LINTING & FORMATTING (DEV DEPENDENCIES)
+# ------------------------------------------------------------------------------
+black==24.1.1
+    # The uncompromising code formatter.
+isort==5.13.2
+    # Import sorter.
+flake8==7.0.0
+    # Linter.
+mypy==1.8.0
+    # Static type checker.
+
+# ------------------------------------------------------------------------------
+# DEPENDENCY RESOLUTION HELPERS
+# Explicit pins to prevent sub-dependency conflicts
+# ------------------------------------------------------------------------------
+typing-extensions==4.9.0
+    # Backported type hints.
+anyio==4.2.0
+    # High level compatibility layer for multiple asynchronous event loop implementations.
+sniffio==1.3.0
+    # Detect which async library is running.
+idna==3.6
+    # Internationalized Domain Names in Applications.
+certifi==2024.2.2
+    # Python package for providing Mozilla's CA Bundle.
