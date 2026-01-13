@@ -1,0 +1,136 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+    <meta http-equiv="X-UA-Compatible" content="IE=edge" />
+    
+    <!-- Application Metadata -->
+    <title>CodeCraft AI | Architectural Engine</title>
+    <meta name="description" content="High-concurrency architectural visualization and management interface." />
+    <meta name="theme-color" content="#0f172a" />
+    
+    <!-- Performance Hints -->
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    
+    <!-- Favicon Configuration -->
+    <link rel="icon" type="image/svg+xml" href="/vite.svg" />
+    <link rel="alternate icon" href="/favicon.ico" />
+    
+    <!-- Critical Shell Styles (Inline for FCP) -->
+    <style>
+      :root {
+        --bg-primary: #0f172a;
+        --text-primary: #f8fafc;
+        --accent-color: #3b82f6;
+        --loader-size: 48px;
+      }
+
+      * {
+        box-sizing: border-box;
+        margin: 0;
+        padding: 0;
+      }
+
+      body {
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+        background-color: var(--bg-primary);
+        color: var(--text-primary);
+        height: 100vh;
+        width: 100vw;
+        overflow: hidden;
+        display: flex;
+        flex-direction: column;
+      }
+
+      /* Root Container */
+      #app {
+        flex: 1;
+        display: flex;
+        flex-direction: column;
+        height: 100%;
+        width: 100%;
+      }
+
+      /* Initial Loading State Styles */
+      .shell-loader-container {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        height: 100%;
+        width: 100%;
+        position: absolute;
+        top: 0;
+        left: 0;
+        z-index: 9999;
+        background: var(--bg-primary);
+        transition: opacity 0.5s ease-out;
+      }
+
+      .shell-loader {
+        width: var(--loader-size);
+        height: var(--loader-size);
+        border: 3px solid rgba(59, 130, 246, 0.3);
+        border-radius: 50%;
+        border-top-color: var(--accent-color);
+        animation: spin 1s ease-in-out infinite;
+        margin-bottom: 1rem;
+      }
+
+      .shell-text {
+        font-family: monospace;
+        font-size: 0.875rem;
+        color: #94a3b8;
+        letter-spacing: 0.05em;
+        animation: pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+      }
+
+      @keyframes spin {
+        to { transform: rotate(360deg); }
+      }
+
+      @keyframes pulse {
+        0%, 100% { opacity: 1; }
+        50% { opacity: 0.5; }
+      }
+
+      /* Utility for hiding scrollbars during load */
+      .no-scroll {
+        overflow: hidden;
+      }
+    </style>
+  </head>
+  <body>
+    <noscript>
+      <div style="padding: 2rem; text-align: center; color: #ef4444; font-family: sans-serif;">
+        <strong>JavaScript Required</strong>
+        <p>This application requires JavaScript to function. Please enable it in your browser settings.</p>
+      </div>
+    </noscript>
+
+    <!-- Application Mount Point -->
+    <div id="app">
+      <!-- Shell Loading State (Replaced by App upon hydration) -->
+      <div class="shell-loader-container" id="shell-loader">
+        <div class="shell-loader"></div>
+        <div class="shell-text">INITIALIZING ENGINE...</div>
+      </div>
+    </div>
+
+    <!-- Portal Roots for Modals/Overlays -->
+    <div id="portal-root"></div>
+    <div id="toast-root"></div>
+
+    <!-- Module Entry Point -->
+    <!-- Note: In a real build environment (Vite/Webpack), this is injected automatically. -->
+    <!-- Assuming a standard src/main.tsx or src/main.js entry -->
+    <script type="module" src="/src/main.tsx"></script>
+    
+    <!-- Fallback for legacy browsers -->
+    <script nomodule>
+      console.error("Your browser does not support ES Modules. Please upgrade to a modern browser.");
+    </script>
+  </body>
+</html>

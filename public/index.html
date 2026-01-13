@@ -1,0 +1,650 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>CodeCraft AI // System Dashboard</title>
+    <style>
+        :root {
+            --bg-primary: #0d1117;
+            --bg-secondary: #161b22;
+            --bg-tertiary: #21262d;
+            --text-primary: #c9d1d9;
+            --text-secondary: #8b949e;
+            --accent-color: #58a6ff;
+            --success-color: #238636;
+            --error-color: #da3633;
+            --warning-color: #d29922;
+            --border-color: #30363d;
+            --font-mono: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, monospace;
+        }
+
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+
+        body {
+            background-color: var(--bg-primary);
+            color: var(--text-primary);
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+            height: 100vh;
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+        }
+
+        /* Header */
+        header {
+            background-color: var(--bg-secondary);
+            border-bottom: 1px solid var(--border-color);
+            padding: 1rem 1.5rem;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            height: 60px;
+        }
+
+        .brand {
+            font-family: var(--font-mono);
+            font-weight: bold;
+            font-size: 1.2rem;
+            color: var(--accent-color);
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .brand::before {
+            content: '';
+            display: block;
+            width: 12px;
+            height: 12px;
+            background-color: var(--success-color);
+            border-radius: 50%;
+            box-shadow: 0 0 8px var(--success-color);
+        }
+
+        .status-pill {
+            background-color: var(--bg-tertiary);
+            border: 1px solid var(--border-color);
+            padding: 4px 12px;
+            border-radius: 100px;
+            font-size: 0.8rem;
+            font-family: var(--font-mono);
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .status-indicator {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            background-color: var(--text-secondary);
+        }
+
+        .status-indicator.active {
+            background-color: var(--success-color);
+            box-shadow: 0 0 5px var(--success-color);
+        }
+
+        .status-indicator.error {
+            background-color: var(--error-color);
+        }
+
+        /* Main Layout */
+        main {
+            flex: 1;
+            display: grid;
+            grid-template-columns: 250px 1fr;
+            overflow: hidden;
+        }
+
+        /* Sidebar */
+        aside {
+            background-color: var(--bg-secondary);
+            border-right: 1px solid var(--border-color);
+            padding: 1rem;
+            display: flex;
+            flex-direction: column;
+            gap: 1rem;
+        }
+
+        .nav-section {
+            margin-bottom: 1rem;
+        }
+
+        .nav-title {
+            font-size: 0.75rem;
+            text-transform: uppercase;
+            color: var(--text-secondary);
+            margin-bottom: 0.5rem;
+            font-weight: bold;
+            letter-spacing: 0.05em;
+        }
+
+        .nav-item {
+            display: block;
+            padding: 0.5rem 0.75rem;
+            color: var(--text-primary);
+            text-decoration: none;
+            border-radius: 6px;
+            font-size: 0.9rem;
+            cursor: pointer;
+            transition: background 0.2s;
+        }
+
+        .nav-item:hover, .nav-item.active {
+            background-color: var(--bg-tertiary);
+            color: var(--accent-color);
+        }
+
+        /* Dashboard Content */
+        .dashboard-container {
+            padding: 1.5rem;
+            overflow-y: auto;
+            display: grid;
+            grid-template-columns: repeat(2, 1fr);
+            grid-template-rows: auto 1fr;
+            gap: 1.5rem;
+            height: 100%;
+        }
+
+        .card {
+            background-color: var(--bg-secondary);
+            border: 1px solid var(--border-color);
+            border-radius: 6px;
+            padding: 1.5rem;
+            display: flex;
+            flex-direction: column;
+        }
+
+        .card.full-width {
+            grid-column: span 2;
+        }
+
+        .card-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 1rem;
+            padding-bottom: 0.5rem;
+            border-bottom: 1px solid var(--border-color);
+        }
+
+        .card-title {
+            font-size: 1rem;
+            font-weight: 600;
+            color: var(--text-primary);
+        }
+
+        /* Metrics Grid */
+        .metrics-grid {
+            display: grid;
+            grid-template-columns: repeat(4, 1fr);
+            gap: 1rem;
+        }
+
+        .metric-box {
+            background-color: var(--bg-tertiary);
+            padding: 1rem;
+            border-radius: 4px;
+            text-align: center;
+        }
+
+        .metric-value {
+            font-size: 1.5rem;
+            font-weight: bold;
+            color: var(--accent-color);
+            font-family: var(--font-mono);
+        }
+
+        .metric-label {
+            font-size: 0.8rem;
+            color: var(--text-secondary);
+            margin-top: 0.25rem;
+        }
+
+        /* Terminal / Logs */
+        .terminal {
+            background-color: #000;
+            color: #33ff00;
+            font-family: var(--font-mono);
+            font-size: 0.85rem;
+            padding: 1rem;
+            border-radius: 4px;
+            height: 300px;
+            overflow-y: auto;
+            white-space: pre-wrap;
+            border: 1px solid var(--border-color);
+        }
+
+        .log-entry {
+            margin-bottom: 4px;
+            display: flex;
+        }
+
+        .log-ts {
+            color: #666;
+            margin-right: 10px;
+            user-select: none;
+        }
+
+        .log-info { color: #58a6ff; }
+        .log-warn { color: #d29922; }
+        .log-error { color: #da3633; }
+
+        /* Endpoint Tester Form */
+        .control-group {
+            display: flex;
+            gap: 10px;
+            margin-bottom: 10px;
+        }
+
+        input, select, button {
+            padding: 8px 12px;
+            border-radius: 4px;
+            border: 1px solid var(--border-color);
+            background-color: var(--bg-primary);
+            color: var(--text-primary);
+            font-family: var(--font-mono);
+            font-size: 0.9rem;
+        }
+
+        input:focus, select:focus {
+            outline: none;
+            border-color: var(--accent-color);
+        }
+
+        button {
+            background-color: var(--bg-tertiary);
+            cursor: pointer;
+            font-weight: 600;
+            transition: all 0.2s;
+        }
+
+        button:hover {
+            background-color: var(--accent-color);
+            color: #fff;
+            border-color: var(--accent-color);
+        }
+
+        button.secondary {
+            background-color: transparent;
+            color: var(--text-secondary);
+        }
+        
+        button.secondary:hover {
+            color: var(--text-primary);
+            background-color: var(--bg-tertiary);
+            border-color: var(--border-color);
+        }
+
+        .json-preview {
+            background-color: var(--bg-tertiary);
+            padding: 1rem;
+            border-radius: 4px;
+            font-family: var(--font-mono);
+            font-size: 0.85rem;
+            color: var(--text-primary);
+            min-height: 100px;
+            max-height: 200px;
+            overflow: auto;
+            margin-top: 10px;
+        }
+
+        /* Responsive */
+        @media (max-width: 768px) {
+            main {
+                grid-template-columns: 1fr;
+            }
+            aside {
+                display: none;
+            }
+            .dashboard-container {
+                grid-template-columns: 1fr;
+            }
+            .card.full-width {
+                grid-column: span 1;
+            }
+            .metrics-grid {
+                grid-template-columns: repeat(2, 1fr);
+            }
+        }
+    </style>
+</head>
+<body>
+
+<header>
+    <div class="brand">
+        CodeCraft AI // ARCHITECT
+    </div>
+    <div class="status-pill">
+        <div id="ws-status" class="status-indicator"></div>
+        <span id="ws-text">Disconnected</span>
+    </div>
+</header>
+
+<main>
+    <aside>
+        <div class="nav-section">
+            <div class="nav-title">Monitoring</div>
+            <a class="nav-item active">Overview</a>
+            <a class="nav-item">Metrics</a>
+            <a class="nav-item">Logs</a>
+        </div>
+        <div class="nav-section">
+            <div class="nav-title">Testing</div>
+            <a class="nav-item">Endpoint Tester</a>
+            <a class="nav-item">Load Generator</a>
+        </div>
+        <div class="nav-section">
+            <div class="nav-title">System</div>
+            <a class="nav-item">Configuration</a>
+            <a class="nav-item">About</a>
+        </div>
+    </aside>
+
+    <div class="dashboard-container">
+        
+        <!-- System Health Overview -->
+        <div class="card full-width">
+            <div class="card-header">
+                <span class="card-title">System Telemetry</span>
+                <button class="secondary" onclick="dashboard.refreshMetrics()">Refresh</button>
+            </div>
+            <div class="metrics-grid">
+                <div class="metric-box">
+                    <div class="metric-value" id="metric-uptime">0s</div>
+                    <div class="metric-label">Uptime</div>
+                </div>
+                <div class="metric-box">
+                    <div class="metric-value" id="metric-req">0</div>
+                    <div class="metric-label">Total Requests</div>
+                </div>
+                <div class="metric-box">
+                    <div class="metric-value" id="metric-latency">0ms</div>
+                    <div class="metric-label">Avg Latency</div>
+                </div>
+                <div class="metric-box">
+                    <div class="metric-value" id="metric-errors">0%</div>
+                    <div class="metric-label">Error Rate</div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Endpoint Tester -->
+        <div class="card">
+            <div class="card-header">
+                <span class="card-title">Endpoint Tester</span>
+            </div>
+            <div class="control-group">
+                <select id="req-method">
+                    <option value="GET">GET</option>
+                    <option value="POST">POST</option>
+                    <option value="PUT">PUT</option>
+                    <option value="DELETE">DELETE</option>
+                </select>
+                <input type="text" id="req-url" value="/api/health" style="flex: 1;" placeholder="/api/endpoint">
+                <button onclick="dashboard.sendRequest()">Send</button>
+            </div>
+            <div class="control-group">
+                <input type="text" id="req-body" style="flex: 1;" placeholder='{"key": "value"} (for POST/PUT)'>
+            </div>
+            <div class="json-preview" id="req-output">
+                // Response will appear here...
+            </div>
+        </div>
+
+        <!-- Real-time Logs -->
+        <div class="card">
+            <div class="card-header">
+                <span class="card-title">Live Event Stream</span>
+                <button class="secondary" onclick="dashboard.clearLogs()">Clear</button>
+            </div>
+            <div class="terminal" id="console-output">
+                <div class="log-entry"><span class="log-ts">[SYSTEM]</span> Initializing dashboard...</div>
+            </div>
+        </div>
+
+    </div>
+</main>
+
+<script>
+    /**
+     * Dashboard Logic for CodeCraft AI
+     * Handles WebSocket connections, REST testing, and UI updates.
+     */
+    class DashboardManager {
+        constructor() {
+            this.ws = null;
+            this.reconnectInterval = 3000;
+            this.endpoints = {
+                health: '/api/health',
+                metrics: '/api/metrics'
+            };
+            
+            // DOM Elements
+            this.dom = {
+                wsStatus: document.getElementById('ws-status'),
+                wsText: document.getElementById('ws-text'),
+                console: document.getElementById('console-output'),
+                reqOutput: document.getElementById('req-output'),
+                metrics: {
+                    uptime: document.getElementById('metric-uptime'),
+                    req: document.getElementById('metric-req'),
+                    latency: document.getElementById('metric-latency'),
+                    errors: document.getElementById('metric-errors')
+                }
+            };
+
+            this.init();
+        }
+
+        init() {
+            this.log("Dashboard initialized.");
+            this.connectWebSocket();
+            this.startPolling();
+        }
+
+        /**
+         * Connect to Backend WebSocket for real-time updates
+         */
+        connectWebSocket() {
+            const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+            const wsUrl = `${protocol}//${window.location.host}/ws`;
+            
+            this.log(`Attempting WebSocket connection to ${wsUrl}...`);
+
+            try {
+                this.ws = new WebSocket(wsUrl);
+
+                this.ws.onopen = () => {
+                    this.setConnectionStatus(true);
+                    this.log("WebSocket connected.", "info");
+                };
+
+                this.ws.onmessage = (event) => {
+                    try {
+                        const data = JSON.parse(event.data);
+                        this.handleSocketMessage(data);
+                    } catch (e) {
+                        this.log(`Raw WS Message: ${event.data}`);
+                    }
+                };
+
+                this.ws.onclose = () => {
+                    this.setConnectionStatus(false);
+                    this.log("WebSocket disconnected. Retrying...", "warn");
+                    setTimeout(() => this.connectWebSocket(), this.reconnectInterval);
+                };
+
+                this.ws.onerror = (err) => {
+                    this.log("WebSocket error occurred.", "error");
+                    this.setConnectionStatus(false);
+                };
+
+            } catch (e) {
+                this.log(`WebSocket setup failed: ${e.message}`, "error");
+            }
+        }
+
+        setConnectionStatus(isConnected) {
+            if (isConnected) {
+                this.dom.wsStatus.className = "status-indicator active";
+                this.dom.wsText.textContent = "Connected";
+                this.dom.wsText.style.color = "var(--success-color)";
+            } else {
+                this.dom.wsStatus.className = "status-indicator error";
+                this.dom.wsText.textContent = "Disconnected";
+                this.dom.wsText.style.color = "var(--error-color)";
+            }
+        }
+
+        handleSocketMessage(data) {
+            // Expecting format: { type: 'log'|'metric', payload: ... }
+            if (data.type === 'log') {
+                this.log(`[SERVER] ${data.payload}`);
+            } else if (data.type === 'metric') {
+                this.updateMetrics(data.payload);
+            } else if (data.type === 'pong') {
+                // Heartbeat
+            } else {
+                this.log(`Received: ${JSON.stringify(data)}`);
+            }
+        }
+
+        /**
+         * Poll REST endpoints for basic stats if WS is not providing them
+         */
+        startPolling() {
+            setInterval(() => {
+                this.refreshMetrics();
+            }, 5000);
+        }
+
+        async refreshMetrics() {
+            try {
+                const res = await fetch(this.endpoints.metrics);
+                if (res.ok) {
+                    const data = await res.json();
+                    this.updateMetrics(data);
+                }
+            } catch (e) {
+                // Silent fail on polling to avoid console spam
+            }
+        }
+
+        updateMetrics(data) {
+            if (data.uptime) this.dom.metrics.uptime.textContent = this.formatUptime(data.uptime);
+            if (data.requests !== undefined) this.dom.metrics.req.textContent = data.requests;
+            if (data.latency !== undefined) this.dom.metrics.latency.textContent = data.latency + 'ms';
+            if (data.errorRate !== undefined) this.dom.metrics.errors.textContent = data.errorRate + '%';
+        }
+
+        formatUptime(seconds) {
+            if (seconds < 60) return seconds + 's';
+            const mins = Math.floor(seconds / 60);
+            if (mins < 60) return mins + 'm';
+            const hours = Math.floor(mins / 60);
+            return hours + 'h ' + (mins % 60) + 'm';
+        }
+
+        /**
+         * Endpoint Tester Logic
+         */
+        async sendRequest() {
+            const method = document.getElementById('req-method').value;
+            const url = document.getElementById('req-url').value;
+            const bodyStr = document.getElementById('req-body').value;
+            
+            this.dom.reqOutput.textContent = "Sending...";
+            
+            const options = {
+                method: method,
+                headers: {
+                    'Content-Type': 'application/json'
+                }
+            };
+
+            if (method !== 'GET' && method !== 'DELETE' && bodyStr) {
+                try {
+                    JSON.parse(bodyStr); // Validate JSON
+                    options.body = bodyStr;
+                } catch (e) {
+                    this.dom.reqOutput.textContent = "Error: Invalid JSON body";
+                    return;
+                }
+            }
+
+            const startTime = performance.now();
+            try {
+                const res = await fetch(url, options);
+                const endTime = performance.now();
+                const duration = (endTime - startTime).toFixed(2);
+                
+                let responseData;
+                const contentType = res.headers.get("content-type");
+                if (contentType && contentType.indexOf("application/json") !== -1) {
+                    responseData = await res.json();
+                } else {
+                    responseData = await res.text();
+                }
+
+                const output = {
+                    status: res.status,
+                    statusText: res.statusText,
+                    duration: `${duration}ms`,
+                    data: responseData
+                };
+
+                this.dom.reqOutput.textContent = JSON.stringify(output, null, 2);
+                this.log(`${method} ${url} - ${res.status} (${duration}ms)`, res.ok ? 'info' : 'error');
+
+            } catch (e) {
+                this.dom.reqOutput.textContent = `Network Error: ${e.message}`;
+                this.log(`Failed to fetch ${url}: ${e.message}`, 'error');
+            }
+        }
+
+        /**
+         * Logging Utility
+         */
+        log(message, type = 'info') {
+            const now = new Date().toLocaleTimeString();
+            const entry = document.createElement('div');
+            entry.className = 'log-entry';
+            
+            let typeClass = 'log-info';
+            if (type === 'warn') typeClass = 'log-warn';
+            if (type === 'error') typeClass = 'log-error';
+
+            entry.innerHTML = `<span class="log-ts">[${now}]</span> <span class="${typeClass}">${this.escapeHtml(message)}</span>`;
+            
+            this.dom.console.appendChild(entry);
+            this.dom.console.scrollTop = this.dom.console.scrollHeight;
+        }
+
+        clearLogs() {
+            this.dom.console.innerHTML = '';
+        }
+
+        escapeHtml(text) {
+            if (typeof text !== 'string') return JSON.stringify(text);
+            return text
+                .replace(/&/g, "&amp;")
+                .replace(/</g, "&lt;")
+                .replace(/>/g, "&gt;")
+                .replace(/"/g, "&quot;")
+                .replace(/'/g, "&#039;");
+        }
+    }
+
+    // Initialize
+    const dashboard = new DashboardManager();
+</script>
+
+</body>
+</html>
